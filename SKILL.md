@@ -1,8 +1,8 @@
 ---
 name: eliot
-version: "0.1.0"
+version: "0.2.0"
 description: |
-  Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap. Manages an Obsidian vault via the local obsidian CLI: captures notes into a fixed hierarchy (Inbox/, Notes/, Projects/, Plans/, Schedules/, Eliot/), maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
+  Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap. Manages an Obsidian vault via the local obsidian CLI: captures notes into a single Obsidian folder (default `Eliot/`) holding Inbox, Notes, Projects, Plans, Schedules, and the Profile — nothing is scattered at the vault root. Maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
 user-invocable: true
 argument-hint: "[status | help | brief | wrap]"
 allowed-tools: >-
@@ -45,7 +45,7 @@ Before anything else on every invocation:
 1. Detect home dir: Windows → `$env:USERPROFILE`; macOS/Linux → `$HOME`. Never hard-code OS-specific paths.
 2. Construct sentinel path: `<home>/.eliot/onboarded` (Windows: `<USERPROFILE>\.eliot\onboarded`).
 3. `Read` the sentinel at that absolute path. Record result: **sentinel-present** or **sentinel-absent**.
-4. `Bash(obsidian read path="Eliot/Profile.md")` — use path-form (not file=) to avoid wikilink collisions. Record result: **profile-present** or **profile-absent**.
+4. `Bash(obsidian read path="<root>/Profile.md")` — use path-form (not file=) to avoid wikilink collisions. Default resolves to `Eliot/Profile.md`. Record result: **profile-present** or **profile-absent**.
 5. Branch on the four sentinel-state cases:
    - **(a) Both absent** → §Silent Setup (run silently, then proceed with the task).
    - **(b) Both present** → §Session Open (normal operation).
@@ -59,7 +59,7 @@ See [`reference.md §3.2`](./reference.md#32--sentinel-write-procedure) for sent
 ## §Session Open
 
 On first invocation of a session (after sentinel passes):
-- `Bash(obsidian read path="<eliot>/Profile.md")` — once per session; cache in context; do not re-read.
+- `Bash(obsidian read path="<root>/Profile.md")` — once per session; cache in context; do not re-read.
 - Greet per §Greeting Template (in `reference.md`). Greeting references a Profile.md fact within first 3 turns.
 
 ---
@@ -78,18 +78,18 @@ Record all `vault_layout` defaults in memory. Do NOT pre-create folders. Do NOT 
 Profile.md is a vault file — it MUST be created via `obsidian create` so Obsidian indexes it. Do NOT use the `Write` tool for vault files.
 
 ```
-obsidian create name="Profile.md" path="Eliot" content="# Profile\n\n## Working Hours\n\n## Routines\n\n## People\n\n## Preferences\n- default_capture_time: unset\n\n## Recurring Projects\n\n## Vault Layout\nvault_layout:\n  inbox: Inbox\n  inbox_file: Inbox.md\n  notes: Notes\n  notes_subdir_template: YYYY\n  projects: Projects\n  plans: Plans\n  schedules_daily: Schedules/Daily\n  schedules_daily_filename: YYYY-MM-DD.md\n  eliot: Eliot\n"
+obsidian create name="Profile.md" path="Eliot" content="# Profile\n\n## Working Hours\n\n## Routines\n\n## People\n\n## Preferences\n- default_capture_time: unset\n\n## Recurring Projects\n\n## Vault Layout\nvault_layout:\n  root: Eliot\n  inbox: Inbox\n  inbox_file: Inbox.md\n  notes: Notes\n  notes_subdir_template: YYYY\n  projects: Projects\n  plans: Plans\n  schedules_daily: Schedules/Daily\n  schedules_daily_filename: YYYY-MM-DD.md\n"
 ```
 
 Do NOT use the `silent` flag here — if the create fails (e.g. Eliot folder doesn't exist), the error must surface so you can handle it. If it fails, retry with an explicit folder creation step first: `obsidian create name=".keep" path="Eliot" content=""` then retry Profile.md creation.
 
-After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1)` (macOS/Linux) or `Bash(Start-Sleep -Seconds 1)` (Windows). Then verify with `obsidian read path="Eliot/Profile.md"` before proceeding.
+After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1)` (macOS/Linux) or `Bash(Start-Sleep -Seconds 1)` (Windows). Then verify with `obsidian read path="<root>/Profile.md"` before proceeding.
 
 **Step 4 — Write sentinel (REQUIRED):**
 Use Claude Code `Write` tool (NOT shell redirection). Detect home: Windows = `$env:USERPROFILE`, macOS/Linux = `$HOME`. Write to `<home>/.eliot/onboarded`:
 ```
 onboarded_at: <ISO-8601>
-skill_version: 0.1.0
+skill_version: 0.2.0
 ```
 
 **Step 5 — Execute the user's task:**
@@ -112,7 +112,7 @@ For the folder about to be used:
    - One synonym match → adopt silently, update `vault_layout` in Profile.md (§7a rewrite), no prompt.
    - Multiple candidates or genuine ambiguity → ask user once: "I found `<candidate>` — use this for <folder>?" 
 3. No match → create folder with canonical name after user consents. Never silently create.
-4. Record outcome in `Eliot/Profile.md ## Vault Layout` (schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema)).
+4. Record outcome in `<root>/Profile.md ## Vault Layout` (schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema)).
 
 **A3 Daily-Notes plugin reconciliation** (runs lazily, first time a daily note is written):
 1. `obsidian eval code="JSON.stringify(app.internalPlugins.plugins['daily-notes'].instance.options)"` — requires per-invocation approval (eval can mutate vault state).
@@ -124,13 +124,13 @@ For the folder about to be used:
 
 ## §Path Resolution
 
-Resolve vault paths from Profile.md `vault_layout:` first; fallback to canonical defaults. Defaults: `inbox=Inbox`, `inbox_file=Inbox.md`, `notes=Notes`, `notes_subdir_template=YYYY`, `projects=Projects`, `plans=Plans`, `schedules_daily=Schedules/Daily`, `schedules_daily_filename=YYYY-MM-DD.md`, `eliot=Eliot`. Full schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema) — includes sanitization rules for values used in `obsidian eval`. Never hard-code vault paths.
+Resolve vault paths from Profile.md `vault_layout:` first; fallback to canonical defaults. All folder values are **relative to `<root>`**. Defaults: `root=Eliot`, `inbox=Inbox`, `inbox_file=Inbox.md`, `notes=Notes`, `notes_subdir_template=YYYY`, `projects=Projects`, `plans=Plans`, `schedules_daily=Schedules/Daily`, `schedules_daily_filename=YYYY-MM-DD.md`. Profile.md lives at `<root>/Profile.md`. If `root` is empty, paths are vault-root-relative (legacy mode). Full schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema) — includes sanitization rules for values used in `obsidian eval`. Never hard-code vault paths.
 
 ---
 
 ## §Last-Write Record (FR-015)
 
-Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op, content }`. Bulk-triage entry (one slot): `{ ts, op:"bulk-triage", batch_size, items:[...] }`. Evict oldest on overflow. Lost on session end (documented v1 limit).
+Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op, content }`. Bulk-triage entry (one slot): `{ ts, op:"bulk-triage", batch_size, items:[...] }`. Dual-link entry (one slot): `{ ts, op:"dual-link", items:[...] }` — see §Dual-Link Detection. Evict oldest on overflow. Lost on session end (documented v1 limit).
 
 **Trigger phrases:** "undo that", "undo the last capture", "fix the last write", "what did you just write", "show last write".
 
@@ -141,13 +141,13 @@ Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op
 ## §/eliot status (FR-014)
 
 Response ≤ 12 lines. Steps:
-1. Version = `0.1.0` from frontmatter.
+1. Version = `0.2.0` from frontmatter.
 2. `Bash(obsidian vault)` → vault name + path.
-3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<inbox>') !== null, ... })` for all 6 folders. Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard). Fallback: `obsidian read path="<folder>/.empty"` per folder.
-4. `Bash(obsidian read path="<eliot>/Profile.md")`.
-5. Return: `Eliot 0.1.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, update memory, undo last write, /eliot help.`
+3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<root>/<inbox>') !== null, ... })` for all 5 subfolders. Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard). Fallback: `obsidian read path="<root>/<folder>/.empty"` per folder.
+4. `Bash(obsidian read path="<root>/Profile.md")`.
+5. Return: `Eliot 0.2.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, update memory, undo last write, /eliot help.`
 
-Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.1.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
+Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.2.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
 
 ---
 
@@ -168,7 +168,7 @@ Two-phase procedure. Full table in [`reference.md §C.1`](./reference.md#c1--cla
 - **Rule 1:** explicit date/time anchor → **schedule-item** → `<schedules_daily>/<date>.md`, append `- [ ] HH:MM <content>`
 - **Rule 2:** starts with action verb OR is a concrete noun/noun phrase implying a task (e.g., a shopping item, a single-item reminder), with no project ref and no time anchor → **task** → today's daily note, append `- [ ] <content>`
 - **Rule 3:** references existing project by name/wikilink → **project-update** → `<projects>/<slug>.md` under `## Log`, append `- YYYY-MM-DD: <content>`
-- **Rule 4:** declarative ≥ 20 words or contains "I think"/"note that"/"TIL"/"idea:" → **note** → `<notes>/<YYYY>/<slug>.md`, create
+- **Rule 4:** declarative ≥ 20 words or contains "I think"/"note that"/"TIL"/"idea:" → **note** → `<notes>/<YYYY>/<slug>.md`, create; then run §Dual-Link Detection.
 - **Rule 6 (fallback):** none of Rules 1–4 match → **inbox** → `<inbox>/<inbox_file>`, append `- [YYYY-MM-DD HH:MM] <content>` · see [`reference.md §C.2`](./reference.md#c2--type--path-lookup)
 
 ---
@@ -184,8 +184,49 @@ Two-phase procedure. Full table in [`reference.md §C.1`](./reference.md#c1--cla
    - Missing daily note: create stub first (`obsidian create`, requires approval), then append.
    - Multiple vaults: run `obsidian vaults`; ask which vault before any write.
    - Unclassifiable → inbox; tell user "I wasn't sure — parked it in Inbox. Triage anytime."
-3. Write via obsidian subcommand — all writes require per-invocation approval (NOT pre-approved).
-4. Confirm: "Captured to `<path>` — `<line written>`." Record in last-write record.
+3. Write via obsidian subcommand — all writes require per-invocation approval (NOT pre-approved). If §Dual-Link Detection set `related_project`, also run the project-side append (step 5 of §Dual-Link Detection) as a second approved write.
+4. Confirm. Standard: "Captured to `<path>` — `<line written>`." Dual-link: "Captured note to `<path>` and linked to `[[<related_project>]]`." Record in last-write record using `dual-link` op when `related_project` is set.
+
+---
+
+## §Dual-Link Detection (FR-DL-001)
+
+Runs inside §Capture Flow only when classification is **note** (Rule 4). Never runs for other types.
+
+**Step 1 — Extract project tokens from content:**
+- Explicit `[[wikilinks]]` — extract the wikilink target.
+- Capitalized noun phrases (2–3 words).
+- Text after patterns: `for|in|on|about <X> project` or `the <X> project`.
+
+**Step 2 — Search Projects/ folder:**
+For each candidate token: `Bash(obsidian search query="<token>" path="<projects>" format=json limit=5)`.
+
+**Step 3 — Decide:**
+- **Exactly one match** → set `related_project = <matched-slug>`; continue silently.
+- **Multiple matches** → ask once: "I found `<a>`, `<b>` — link this note to which project?" Wait for answer before writing.
+- **No match** → `related_project` unset; use standard note template; skip steps 4–5.
+
+**Step 4 — Note side:**
+When `related_project` is set, use the linked note template from `reference.md §Templates` — it includes a `## Related Project\n[[<project-slug>]]` section at the bottom.
+
+**Step 5 — Project side (runs after note is created, requires per-invocation approval):**
+- `<one-line summary>` = first sentence of note content, truncated to ~80 chars.
+- Project **has** a `## Notes` section: `obsidian append path="<projects>/<related_project>.md" content="\n- [[<note-slug>]] — <one-line summary>"`
+- Project **has no** `## Notes` section: `obsidian append path="<projects>/<related_project>.md" content="\n## Notes\n- [[<note-slug>]] — <one-line summary>"`
+- Never rewrite the whole project file for this operation — always use `obsidian append`.
+
+**Last-write record for dual-link (occupies one ring-buffer slot):**
+```
+{
+  ts: "<ISO-8601>",
+  op: "dual-link",
+  items: [
+    { file: "<notes>/<YYYY>/<slug>.md", op: "create" },
+    { file: "<projects>/<related_project>.md", op: "append", line: "- [[<note-slug>]] — <one-line summary>" }
+  ]
+}
+```
+Undo prompt: "Undo both the note and the project link, just one, or cancel?"
 
 ---
 
@@ -207,13 +248,13 @@ Two-phase procedure. Full table in [`reference.md §C.1`](./reference.md#c1--cla
 
 ## §Memory — Profile.md (FR-007)
 
-**Append (new fact):** identify §11.4 section header. `obsidian append path="<eliot>/Profile.md" content="\n- <fact>"` (approval required). Confirm path + section.
+**Append (new fact):** identify §11.4 section header. `obsidian append path="<root>/Profile.md" content="\n- <fact>"` (approval required). Confirm path + section.
 
 **Update/Remove (whole-file rewrite, §7a):**
-1. `Bash(obsidian read path="<eliot>/Profile.md")`.
+1. `Bash(obsidian read path="<root>/Profile.md")`.
 2. Parse + apply change in memory. Preserve all other sections verbatim.
 3. Show diff preview ≤ 12 lines (changed lines only). Ask "Apply? (yes / no / show full file)".
-4. On yes: `obsidian create name="Profile.md" path="<eliot>/Profile.md" content="<full-new-content>" overwrite` (destructive → per-invocation approval). Two confirmation layers: Eliot's preview + tool approval.
+4. On yes: `obsidian create name="Profile.md" path="<root>/Profile.md" content="<full-new-content>" overwrite` (destructive → per-invocation approval). Two confirmation layers: Eliot's preview + tool approval.
 5. Record in last-write as op="overwrite-profile" with full pre-write content (enables undo).
 
 Append-style additions (new bullet to existing section): use `obsidian append`, not whole-file rewrite.

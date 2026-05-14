@@ -48,7 +48,7 @@ Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/
 
 ## §A1.2 — Synonym Table (Reconciliation)
 
-Match is case-insensitive; ignore leading numeric, symbol, or emoji prefixes.
+Match is case-insensitive; ignore leading numeric, symbol, or emoji prefixes. Synonym matching applies to folders found **inside `<root>/`** — not at the vault root.
 
 | Canonical | Synonyms |
 |---|---|
@@ -57,30 +57,31 @@ Match is case-insensitive; ignore leading numeric, symbol, or emoji prefixes.
 | `Projects` | Projects, 🚀 Projects, Active Projects, 10 - Projects, 1 - Projects, PARA/1 Projects |
 | `Plans` | Plans, Goals, Intentions, Areas, PARA/2 Areas |
 | `Schedules/Daily` | Schedules/Daily, Daily Notes, Daily, Journal, 📅 Daily, Calendar/Daily |
-| `Eliot` | (no synonyms — if a folder named Eliot already exists, ask the user how to proceed) |
 
 ---
 
 ## §A1.3 — vault_layout Schema
 
-YAML block under `## Vault Layout` in `Eliot/Profile.md`. Only present overrides take effect; missing keys fall back to canonical defaults.
+YAML block under `## Vault Layout` in `<root>/Profile.md`. Only present overrides take effect; missing keys fall back to canonical defaults.
+
+Every folder placeholder (`<inbox>`, `<notes>`, `<projects>`, `<plans>`, `<schedules_daily>`) resolves to `<root>/<value>`. Profile.md lives at `<root>/Profile.md`. If `root` is empty, paths are vault-root-relative (legacy mode).
 
 ```yaml
 vault_layout:
-  inbox: "<path relative to vault root>"
+  root: "<path relative to vault root, default 'Eliot'; empty string = vault root (legacy)>"
+  inbox: "<path relative to <root>, default 'Inbox'>"
   inbox_file: "<filename, default 'Inbox.md'>"
-  notes: "<path>"
+  notes: "<path relative to <root>, default 'Notes'>"
   notes_subdir_template: "<template, default 'YYYY'>"
-  projects: "<path>"
-  plans: "<path>"
-  schedules_daily: "<path>"
+  projects: "<path relative to <root>, default 'Projects'>"
+  plans: "<path relative to <root>, default 'Plans'>"
+  schedules_daily: "<path relative to <root>, default 'Schedules/Daily'>"
   schedules_daily_filename: "<strftime, default 'YYYY-MM-DD.md'>"
-  eliot: "<path, default 'Eliot'>"
 ```
 
 **§A1.4 — vault_layout Value Sanitization (eval-injection guard):**
 
-Before interpolating any `vault_layout` value into an `obsidian eval code=` string:
+Before interpolating any `vault_layout` value (including `root`) into an `obsidian eval code=` string:
 1. Validate the value matches the pattern `^[A-Za-z0-9 _./\-]+$`.
 2. If the value contains any character outside that set (quotes, backslashes, semicolons, pipes, backticks, newlines, or other JS metacharacters): **do not interpolate**. Instead, fall back to the canonical default for that key and warn the user: "Your vault path for `<key>` contains characters that can't be used in a folder check. Using the default `<canonical-default>` instead — you can correct this in Profile.md."
 3. This rule applies to every path value interpolated into `obsidian eval code=` strings anywhere in Eliot's instructions.
@@ -89,13 +90,13 @@ Before interpolating any `vault_layout` value into an `obsidian eval code=` stri
 
 ## §A3 — Schedule Model and Daily-Notes Plugin Reconciliation
 
-Schedules are checkbox tasks (`- [ ] HH:MM <item>`) in daily notes. Default path: `Schedules/Daily/YYYY-MM-DD.md`.
+Schedules are checkbox tasks (`- [ ] HH:MM <item>`) in daily notes. Default path: `<root>/Schedules/Daily/YYYY-MM-DD.md` (resolved default: `Eliot/Schedules/Daily/YYYY-MM-DD.md`).
 
 **Reconciliation procedure (runs once during onboarding):**
 1. `obsidian eval code="JSON.stringify(app.internalPlugins.plugins['daily-notes'].instance.options)"` (requires per-invocation approval).
 2. If plugin returns a configured folder: adopt it as `vault_layout.schedules_daily`. Plugin is authoritative.
 3. If plugin not installed or eval errors: fallback T1 → ask user once for folder path.
-4. Fallback T2 (user doesn't know): assume `Schedules/Daily/` and surface the assumption in the onboarding confirmation.
+4. Fallback T2 (user doesn't know): assume `<root>/Schedules/Daily/` (resolved default: `Eliot/Schedules/Daily/`) and surface the assumption in the onboarding confirmation.
 5. If both `Schedules/Daily/` and `Daily Notes/` exist with content: surface the conflict — "I see daily notes in two places — `Daily Notes/` (<N> files) and `Schedules/Daily/` (<M> files). Which is your live one?" Do not merge.
 
 ---
@@ -117,19 +118,21 @@ Two-phase evaluation. Inbox is always-available fallback.
 | 1 | Content contains explicit date/time anchor (e.g., "tomorrow", "Friday 9pm", "next Tuesday", "2026-05-14") | **schedule-item** |
 | 2 | Content begins with an action verb (call, email, buy, pick up, finish, send, book, …) OR is a concrete noun/noun phrase implying a task (e.g., a shopping item, a single-item reminder) — AND has no project reference AND no time anchor | **task** |
 | 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** |
-| 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** |
+| 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** → then run §Dual-Link Detection (see `SKILL.md`) |
 | 6 (fallback) | None of Rules 1–4 match | **inbox** |
 
 ---
 
 ## §C.2 — Type → Path Lookup
 
+All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` → `Eliot/Projects`).
+
 | Type | Path | Operation |
 |---|---|---|
 | schedule-item | `<schedules_daily>/<target-date>.md` | append `- [ ] HH:MM <content>` |
 | task | `<schedules_daily>/<today>.md` | append `- [ ] <content>` (no time) |
 | project-update | `<projects>/<project-slug>.md` under `## Log` | append `- YYYY-MM-DD: <content>` |
-| note | `<notes>/<YYYY>/<slug>.md` | create new file with note template |
+| note | `<notes>/<YYYY>/<slug>.md` | create with note template; if §Dual-Link Detection finds a project, use linked note template + append `- [[<note-slug>]] — <summary>` to project's `## Notes` |
 | inbox | `<inbox>/<inbox_file>` | append `- [YYYY-MM-DD HH:MM] <content>` |
 
 ---
@@ -179,12 +182,12 @@ Two-phase evaluation. Inbox is always-available fallback.
 ## Vault Layout
 ```yaml
 vault_layout:
-  inbox: "00 - Inbox"
+  root: "Eliot"
+  inbox: "Inbox"
   notes: "Notes"
   projects: "Projects"
   plans: "Plans"
   schedules_daily: "Schedules/Daily"
-  eliot: "Eliot"
 ```
 ```
 
@@ -209,7 +212,7 @@ vault_layout:
 
 Used for any FR-007 update or remove operation on Profile.md sections. Same procedure applies to Working Hours, Routines, People, Preferences, and Recurring Projects when updating/removing (not appending).
 
-1. `Bash(obsidian read path="<eliot>/Profile.md")` — read full current content.
+1. `Bash(obsidian read path="<root>/Profile.md")` — read full current content.
 2. Parse in memory (model is the YAML parser). Locate the target section/key.
 3. Apply change: update key, remove key, or add key. Preserve every other section verbatim. Preserve trailing newline and exact section-header order from §11.4.
 4. Show diff preview ≤ 12 lines (changed lines only):
@@ -219,10 +222,10 @@ Used for any FR-007 update or remove operation on Profile.md sections. Same proc
      + <new line>
    Apply? (yes / no / show full file)
    ```
-5. On confirmation: `obsidian create name="Profile.md" path="<eliot>/Profile.md" content="<full-new-content>" overwrite` — destructive, NOT pre-approved. Two confirmation layers: Eliot's preview above + Claude Code tool approval.
+5. On confirmation: `obsidian create name="Profile.md" path="<root>/Profile.md" content="<full-new-content>" overwrite` — destructive, NOT pre-approved. Two confirmation layers: Eliot's preview above + Claude Code tool approval.
 6. Record in last-write record as `{ op: "overwrite-profile", content: "<full pre-write content>" }` for undo.
 
-For append-style additions (new bullet under existing section): use `obsidian append path="<eliot>/Profile.md" content="\n- <bullet>"` — cheaper, no whole-file rewrite needed.
+For append-style additions (new bullet under existing section): use `obsidian append path="<root>/Profile.md" content="\n- <bullet>"` — cheaper, no whole-file rewrite needed.
 
 ---
 
@@ -265,7 +268,7 @@ Use Claude Code's `Write` tool with an absolute path. NOT shell redirection (`ec
 
 Both sentinels MUST be present to skip setup. Partial state is not silent continuation.
 
-| Sentinel (`~/.eliot/onboarded`) | Profile.md (`<eliot>/Profile.md`) | Action |
+| Sentinel (`~/.eliot/onboarded`) | Profile.md (`<root>/Profile.md`) | Action |
 |---|---|---|
 | Absent | Absent | §Silent Setup (runs silently, then executes task) |
 | Present | Present | §Session Open (normal) |
@@ -325,6 +328,8 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 
 ### Note Template
 
+Used when §Dual-Link Detection finds no matching project.
+
 ```markdown
 # <Title>
 
@@ -334,6 +339,41 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 created: <YYYY-MM-DD>
 tags: 
 ```
+
+### Note Template (with project link)
+
+Used when §Dual-Link Detection sets `related_project`. Adds a `## Related Project` section before the closing divider.
+
+```markdown
+# <Title>
+
+<content>
+
+## Related Project
+[[<project-slug>]]
+
+---
+created: <YYYY-MM-DD>
+tags: 
+```
+
+### Dual-Link: Project-Side Append Format
+
+Appended to `<projects>/<related_project>.md` when §Dual-Link Detection fires. Use `obsidian append` — never rewrite the whole project file.
+
+Project **already has** `## Notes` section:
+```
+- [[<note-slug>]] — <one-line summary>
+```
+
+Project **has no** `## Notes` section (older projects missing the section):
+```
+
+## Notes
+- [[<note-slug>]] — <one-line summary>
+```
+
+`<one-line summary>` = first sentence of note content, truncated to ~80 characters.
 
 ### Eliot/README Template (written during onboarding)
 
@@ -346,20 +386,20 @@ Eliot is a Claude Code skill that manages this vault through the obsidian CLI.
 
 See Eliot/Profile.md `## Vault Layout` for this vault's specific folder mapping.
 
-Default hierarchy:
-- `Inbox/` — quick captures awaiting triage
-- `Notes/<YYYY>/` — durable atomic notes
-- `Projects/` — active multi-step initiatives (each gets its own .md file)
-- `Plans/` — longer-running goals and intentions
-- `Schedules/Daily/<YYYY-MM-DD>.md` — daily notes with checkbox tasks
-- `Eliot/` — Eliot's own files (Profile.md, README.md)
+Default hierarchy (all under `<root>/`, default `Eliot/`):
+- `Eliot/Inbox/` — quick captures awaiting triage
+- `Eliot/Notes/<YYYY>/` — durable atomic notes
+- `Eliot/Projects/` — active multi-step initiatives (each gets its own .md file)
+- `Eliot/Plans/` — longer-running goals and intentions
+- `Eliot/Schedules/Daily/<YYYY-MM-DD>.md` — daily notes with checkbox tasks
+- `Eliot/Profile.md` — Eliot's own profile and vault config
 
 ## Capture Conventions
 
 - `capture: <thought>` — Eliot classifies and files automatically
 - Schedule items use checkbox format: `- [ ] HH:MM <item>`
 - Project log entries: `- YYYY-MM-DD: <entry>` under `## Log`
-- Notes go in `Notes/<YYYY>/<slug>.md`
+- Notes go in `Eliot/Notes/<YYYY>/<slug>.md`
 
 ## Undo
 
