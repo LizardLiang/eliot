@@ -35,8 +35,8 @@ Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/
 
 **Daily review CLI allocation (≤ 3 calls):**
 1. `obsidian tasks daily todo`
-2. `obsidian search query="#due/<today-YYYY-MM-DD>" format=json`
-3. `obsidian search query="#status/active" path="<projects>" format=json`
+2. `obsidian search query="due: <today-YYYY-MM-DD>" format=json`
+3. `obsidian search query="status/active" path="<projects>" format=json` — matches `tags: [project, status/active]` in frontmatter and legacy `#status/active` body text
 
 **Weekly review CLI allocation (≤ 10 calls):**
 - 7 × `obsidian read path="<schedules_daily>/<YYYY-MM-DD>.md"` (past 7 days)
@@ -115,11 +115,12 @@ Two-phase evaluation. Inbox is always-available fallback.
 
 | Priority | Rule | Classified Type |
 |---|---|---|
-| 1 | Content contains explicit date/time anchor (e.g., "tomorrow", "Friday 9pm", "next Tuesday", "2026-05-14") | **schedule-item** |
-| 2 | Content begins with an action verb (call, email, buy, pick up, finish, send, book, …) OR is a concrete noun/noun phrase implying a task (e.g., a shopping item, a single-item reminder) — AND has no project reference AND no time anchor | **task** |
+| 0.5 (check FIRST) | Content starts with or contains "meeting with", "call with", "sync with", "standup", "1:1", "catch-up with", "interview with" | **meeting** → create meeting note; run §Dual-Link Detection (meeting mode). If time anchor also present, additionally append `- [ ] HH:MM [[<meeting-slug>]]` to daily schedule |
+| 1 | Content contains explicit date/time anchor (no meeting keywords) | **schedule-item** |
+| 2 | Content begins with an action verb OR concrete noun implying a task — AND has no project reference AND no time anchor | **task** |
 | 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** |
-| 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** → then run §Dual-Link Detection (see `SKILL.md`) |
-| 6 (fallback) | None of Rules 1–4 match | **inbox** |
+| 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** → create with Note Template (frontmatter MUST have `type: permanent` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (note mode) |
+| 6 (fallback) | None of Rules 0.5–4 match | **inbox** |
 
 ---
 
@@ -129,6 +130,7 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 
 | Type | Path | Operation |
 |---|---|---|
+| meeting | `<notes>/<YYYY>/<slug>.md` | create with meeting note template; run §Dual-Link Detection (meeting mode) — populates `attendees`, `projects`; if time anchor present, also appends `- [ ] HH:MM [[<slug>]]` to daily schedule |
 | schedule-item | `<schedules_daily>/<target-date>.md` | append `- [ ] HH:MM <content>` |
 | task | `<schedules_daily>/<today>.md` | append `- [ ] <content>` (no time) |
 | project-update | `<projects>/<project-slug>.md` under `## Log` | append `- YYYY-MM-DD: <content>` |
@@ -137,7 +139,7 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 
 ---
 
-## §C.3 — Classification Test Table (acceptance: ≥ 11/12)
+## §C.3 — Classification Test Table (acceptance: ≥ 13/15)
 
 | # | Input | Rule | Expected Type | Expected Path |
 |---|---|---|---|---|
@@ -153,6 +155,9 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 | 10 | "capture: aksjdhkjasd" | 6 fallback | inbox | `<inbox>/<inbox_file>` |
 | 11 | "capture: meet Liang next Tuesday 2pm" | 1 | schedule-item | `<schedules_daily>/<next-Tuesday>.md` |
 | 12 | "capture: send invoice to Acme" | 2 | task | `<schedules_daily>/<today>.md` |
+| 13 | "capture: 1:1 with Alice" | 0.5 | meeting | `<notes>/<YYYY>/1-1-with-alice.md` |
+| 14 | "capture: sync with Bob tomorrow at 3pm" | 0.5 | meeting + schedule-item | `<notes>/<YYYY>/sync-with-bob.md` AND `<schedules_daily>/<tomorrow>.md` with `- [ ] 15:00 [[sync-with-bob]]` |
+| 15 | "capture: call with the design team about home-office-renovation" | 0.5 | meeting + project link | `<notes>/<YYYY>/call-with-design-team.md` with `projects: ["[[home-office-renovation]]"]` |
 
 ---
 
@@ -282,13 +287,25 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 ### Project Template
 
 ```markdown
+---
+created: <YYYY-MM-DD>
+type: project
+status: active
+area: "[[]]"
+due:
+tags: [project, status/active]
+---
+
 # <Project Name>
 
-## Status
-#status/active
+## Goal
+[What does done look like?]
 
 ## Next Action
 - 
+
+## Tasks
+- [ ] 
 
 ## Log
 
@@ -298,6 +315,15 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 ### Plan Template
 
 ```markdown
+---
+created: <YYYY-MM-DD>
+type: plan
+status: active
+project: "[[<project-slug>]]"
+review-date: <YYYY-MM-DD>
+tags: [plan]
+---
+
 # <Plan Title>
 
 ## Goal
@@ -305,9 +331,6 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 
 ## Steps
 - [ ] 
-
-## Review Date
-<YYYY-MM-DD>
 
 ## Related Project
 [[<project-slug>]]
@@ -318,12 +341,53 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 ### Daily Note Stub Template (minimal, created when daily note is missing)
 
 ```markdown
+---
+date: <YYYY-MM-DD>
+type: daily
+tags: [daily]
+---
+
 # <YYYY-MM-DD>
+
+## Morning Intentions
+- [ ] 
 
 ## Tasks
 - [ ] 
 
 ## Notes
+
+## Evening Reflection
+```
+
+### Meeting Note Template
+
+Used when content begins with "meeting with", "call with", "sync with", "standup", "1:1", or similar.
+
+```markdown
+---
+date: <YYYY-MM-DD>
+type: meeting
+attendees: []
+projects: []
+summary: ""
+up: []
+tags: [meeting]
+---
+
+# <Meeting Title>
+
+## Attendees
+- 
+
+## Agenda
+
+## Notes
+
+## Decisions
+
+## Action Items
+- [ ] 
 ```
 
 ### Note Template
@@ -331,35 +395,66 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 Used when §Dual-Link Detection finds no matching project.
 
 ```markdown
+---
+id: <YYYYMMDDHHmm>
+created: <YYYY-MM-DD>
+type: permanent
+tags: []
+aliases: []
+up: []
+related: []
+says: ""
+---
+
 # <Title>
+
+## The Idea
 
 <content>
 
----
-created: <YYYY-MM-DD>
-tags: 
+## Why It Matters
+
+## Connections
+- Supports: 
+- Challenges: 
 ```
 
 ### Note Template (with project link)
 
-Used when §Dual-Link Detection sets `related_project`. Adds a `## Related Project` section before the closing divider.
+Used when §Dual-Link Detection sets `related_project`. Includes `up` pointing to the project and a `## Related Project` section.
 
 ```markdown
+---
+id: <YYYYMMDDHHmm>
+created: <YYYY-MM-DD>
+type: permanent
+tags: []
+aliases: []
+up:
+  - "[[<project-slug>]]"
+related: []
+says: ""
+---
+
 # <Title>
+
+## The Idea
 
 <content>
 
+## Why It Matters
+
+## Connections
+- Supports: 
+- Challenges: 
+
 ## Related Project
 [[<project-slug>]]
-
----
-created: <YYYY-MM-DD>
-tags: 
 ```
 
-### Dual-Link: Project-Side Append Format
+### Dual-Link: Note → Project-Side Append Format
 
-Appended to `<projects>/<related_project>.md` when §Dual-Link Detection fires. Use `obsidian append` — never rewrite the whole project file.
+Appended to `<projects>/<related_project>.md` when §Dual-Link Detection fires for a **note**. Use `obsidian append` — never rewrite the whole project file.
 
 Project **already has** `## Notes` section:
 ```
@@ -374,6 +469,39 @@ Project **has no** `## Notes` section (older projects missing the section):
 ```
 
 `<one-line summary>` = first sentence of note content, truncated to ~80 characters.
+
+### Dual-Link: Meeting → Project-Side Append Format
+
+Appended to `<projects>/<related_project>.md` when §Dual-Link Detection (meeting mode) fires. Use `obsidian append`.
+
+Project **already has** `## Notes` section:
+```
+- [[<meeting-slug>]] — meeting <YYYY-MM-DD>: <one-line summary>
+```
+
+Project **has no** `## Notes` section:
+```
+
+## Notes
+- [[<meeting-slug>]] — meeting <YYYY-MM-DD>: <one-line summary>
+```
+
+### §Dual-Link Detection — Meeting Mode
+
+Runs after the meeting note file is created. Three goals: populate attendees, link project, schedule if time-anchored. Each write requires per-invocation approval.
+
+**Step 1 — Extract attendees:**
+Parse pattern "meeting with X", "call with X and Y", "1:1 with X" — extract names after "with". For each name: `obsidian search query="<name>" path="<notes>" limit=3`. If a matching People note exists, render as `[[<slug>]]`; otherwise use plain string. Populate via `obsidian property:set name="attendees" value='["<value>",...]' file="<meeting-slug>.md"`.
+
+**Step 2 — Detect project and link:**
+Extract project tokens from content (same logic as note-mode steps 1–3). If one match: `obsidian property:set name="projects" value='["[[<slug>]]"]' file="<meeting-slug>.md"`. Then append to project's `## Notes` section using the Meeting → Project-Side Append Format above.
+
+**Step 3 — Schedule-item for time-anchored meetings:**
+If content contains a time anchor: `obsidian append path="<schedules_daily>/<date>.md" content="- [ ] HH:MM [[<meeting-slug>]]"`.
+
+**Confirm:** "Created `<path>`. Linked to [[<project-slug>]] and added to your <date> schedule." (omit any line that didn't fire)
+
+---
 
 ### Eliot/README Template (written during onboarding)
 

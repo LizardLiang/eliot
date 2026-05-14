@@ -1,0 +1,122 @@
+{
+  "skill_name": "eliot",
+  "evals": [
+    {
+      "id": 1,
+      "name": "rule5-tiebreaker",
+      "prompt": "capture: home renovation project needs a contractor meeting on Thursday at 2pm",
+      "expected_output": "Classifies as schedule-item via Rule 5 tie-breaker (both time anchor AND project ref present). Appends [[home-renovation-project]] to the item. Writes to schedules_daily/<Thursday>.md. Confirms with ≤2 sentences.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "1a",
+          "name": "project-wikilink-appended",
+          "description": "Response mentions [[home-renovation-project]] or equivalent project wikilink",
+          "check": "response.txt contains '[[' and 'renovation' (case-insensitive)"
+        },
+        {
+          "id": "1b",
+          "name": "classified-as-schedule-item",
+          "description": "Classifies as schedule-item, not task or project-update",
+          "check": "trace.txt or response.txt mentions 'schedule' as the type; does NOT say 'task' or 'project-update' as the classification result"
+        },
+        {
+          "id": "1c",
+          "name": "targets-thursday-daily-note",
+          "description": "Target path is a daily note for Thursday, not Projects/ or Notes/",
+          "check": "trace.txt or response.txt shows a path under Schedules/Daily/ or equivalent, targeting Thursday"
+        },
+        {
+          "id": "1d",
+          "name": "confirmation-is-short",
+          "description": "Confirmation is ≤ 2 sentences (voice rule)",
+          "check": "response.txt contains ≤ 2 sentences of confirmation after the action"
+        },
+        {
+          "id": "1e",
+          "name": "self-names-as-eliot",
+          "description": "Response contains the word 'Eliot' (self-identification, Metric 5a)",
+          "check": "response.txt contains 'Eliot' (case-sensitive)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "daily-review",
+      "prompt": "eliot, what's on my plate today?",
+      "expected_output": "Triggers daily review flow. Makes ≤3 CLI calls. Returns structured response with today's date, schedule, due-today, active projects. ≤10 lines. Eliot voice: no exclamation marks.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "2a",
+          "name": "attempts-tasks-daily-todo",
+          "description": "Attempts obsidian tasks daily todo (CLI call #1)",
+          "check": "trace.txt mentions 'tasks daily todo' or 'daily todo'"
+        },
+        {
+          "id": "2b",
+          "name": "attempts-due-today-search",
+          "description": "Attempts obsidian search with #due/<today> (CLI call #2)",
+          "check": "trace.txt mentions 'search' and '#due/' or 'due'"
+        },
+        {
+          "id": "2c",
+          "name": "structured-multi-section-response",
+          "description": "Response has ≥ 2 distinct sections (schedule, tasks, projects, or equivalent)",
+          "check": "response.txt contains at least 2 section headers or labelled groups"
+        },
+        {
+          "id": "2d",
+          "name": "no-exclamation-marks",
+          "description": "Response contains no exclamation marks (voice rule)",
+          "check": "response.txt does not contain '!'"
+        },
+        {
+          "id": "2e",
+          "name": "graceful-cli-error-handling",
+          "description": "If CLI errors occur, response does not crash or bypass vault — surfaces error cleanly",
+          "check": "response.txt does not contain raw stack traces or attempt direct filesystem reads"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "note-capture",
+      "prompt": "capture: I think the reason our standups always run over is because we don't timebox individual updates — people drift into problem-solving mode instead of just stating status",
+      "expected_output": "Rule 4 fires (≥20 words + 'I think') → note → Notes/<YYYY>/<slug>.md. No clarifying questions. Confirmation ≤2 sentences naming exact file.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "3a",
+          "name": "classified-as-note",
+          "description": "Classifies as note (not task or inbox)",
+          "check": "trace.txt or response.txt says classification is 'note', not 'task', 'inbox', or 'schedule-item'"
+        },
+        {
+          "id": "3b",
+          "name": "targets-notes-folder",
+          "description": "Target path is under Notes/ (not Schedules/ or Projects/ or Inbox/)",
+          "check": "trace.txt or response.txt shows path under 'Notes/' or equivalent notes folder"
+        },
+        {
+          "id": "3c",
+          "name": "meaningful-slug",
+          "description": "Filename/slug is derived from content (not generic like 'note1' or 'capture')",
+          "check": "response.txt or trace.txt shows a filename containing words related to 'standup', 'timebox', or 'meeting'"
+        },
+        {
+          "id": "3d",
+          "name": "confirmation-names-exact-file",
+          "description": "Confirmation ≤ 2 sentences and names the exact file path",
+          "check": "response.txt contains a file path in the confirmation and is ≤ 2 sentences"
+        },
+        {
+          "id": "3e",
+          "name": "no-unnecessary-clarification",
+          "description": "Does not ask clarifying questions (input is unambiguous for Rule 4)",
+          "check": "response.txt does not contain a question mark as a clarification request"
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 ---
 name: eliot
-version: "0.2.0"
+version: "0.3.0"
 description: |
   Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap. Manages an Obsidian vault via the local obsidian CLI: captures notes into a single Obsidian folder (default `Eliot/`) holding Inbox, Notes, Projects, Plans, Schedules, and the Profile — nothing is scattered at the vault root. Maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
 user-invocable: true
@@ -165,10 +165,11 @@ Two-phase procedure. Full table in [`reference.md §C.1`](./reference.md#c1--cla
 - **Rule 5 (tie-breaker):** content has BOTH an explicit date/time anchor AND a reference to an existing project (confirmed via `obsidian search query="<name>" path="<projects>"`) → **schedule-item** → `<schedules_daily>/<date>.md`, line format: `- [ ] HH:MM <content> [[<project-slug>]]`. The wikilink `[[<project-slug>]]` MUST be appended as a literal Obsidian wikilink — not as plain text.
 
 **Phase 2 — Priority scan (first match wins, applied only when Phase 1 did not fire):**
-- **Rule 1:** explicit date/time anchor → **schedule-item** → `<schedules_daily>/<date>.md`, append `- [ ] HH:MM <content>`
+- **Rule 0.5 (check FIRST):** starts with or contains "meeting with", "call with", "sync with", "standup", "1:1", "catch-up with", "interview with" → **meeting** → `<notes>/<YYYY>/<slug>.md`, create with meeting note template from `reference.md §Templates`; run §Dual-Link Detection (meeting mode) to detect project association and populate `projects` frontmatter. If content also contains a time anchor, ADDITIONALLY append `- [ ] HH:MM [[<meeting-slug>]]` to `<schedules_daily>/<date>.md` as a second write (requires separate approval).
+- **Rule 1:** explicit date/time anchor (no meeting keywords) → **schedule-item** → `<schedules_daily>/<date>.md`, append `- [ ] HH:MM <content>`
 - **Rule 2:** starts with action verb OR is a concrete noun/noun phrase implying a task (e.g., a shopping item, a single-item reminder), with no project ref and no time anchor → **task** → today's daily note, append `- [ ] <content>`
 - **Rule 3:** references existing project by name/wikilink → **project-update** → `<projects>/<slug>.md` under `## Log`, append `- YYYY-MM-DD: <content>`
-- **Rule 4:** declarative ≥ 20 words or contains "I think"/"note that"/"TIL"/"idea:" → **note** → `<notes>/<YYYY>/<slug>.md`, create; then run §Dual-Link Detection.
+- **Rule 4:** declarative ≥ 20 words or contains "I think"/"note that"/"TIL"/"idea:" → **note** → `<notes>/<YYYY>/<slug>.md`, create using the Note Template from `reference.md §Templates`. The frontmatter MUST include `type: permanent` and `id: <YYYYMMDDHHmm>` (current timestamp, 12 digits) — never use `title:` or `tags: [note]` as substitutes. Then run §Dual-Link Detection.
 - **Rule 6 (fallback):** none of Rules 1–4 match → **inbox** → `<inbox>/<inbox_file>`, append `- [YYYY-MM-DD HH:MM] <content>` · see [`reference.md §C.2`](./reference.md#c2--type--path-lookup)
 
 ---
@@ -191,7 +192,7 @@ Two-phase procedure. Full table in [`reference.md §C.1`](./reference.md#c1--cla
 
 ## §Dual-Link Detection (FR-DL-001)
 
-Runs inside §Capture Flow only when classification is **note** (Rule 4). Never runs for other types.
+Runs inside §Capture Flow when classification is **note** (Rule 4) or **meeting** (Rule 0.5). Behavior differs by mode — see below.
 
 **Step 1 — Extract project tokens from content:**
 - Explicit `[[wikilinks]]` — extract the wikilink target.
@@ -205,6 +206,10 @@ For each candidate token: `Bash(obsidian search query="<token>" path="<projects>
 - **Exactly one match** → set `related_project = <matched-slug>`; continue silently.
 - **Multiple matches** → ask once: "I found `<a>`, `<b>` — link this note to which project?" Wait for answer before writing.
 - **No match** → `related_project` unset; use standard note template; skip steps 4–5.
+
+**Step 3.5 — Fill `says` and `up` before writing:**
+- `says`: derive from the first sentence of the note content, truncated to ~120 chars. This populates Dataview tables automatically — don't leave it blank.
+- `up`: if `related_project` is set, populate `up: ["[[<project-slug>]]"]`. If not, ask once: "Which topic area does this note belong to? (e.g. `[[Machine Learning MOC]]`, or press Enter to leave blank)". One question, optional — never block the write waiting for it.
 
 **Step 4 — Note side:**
 When `related_project` is set, use the linked note template from `reference.md §Templates` — it includes a `## Related Project\n[[<project-slug>]]` section at the bottom.
@@ -228,11 +233,13 @@ When `related_project` is set, use the linked note template from `reference.md �
 ```
 Undo prompt: "Undo both the note and the project link, just one, or cancel?"
 
+For the meeting-mode procedure (attendee extraction, project link, schedule write), see [`reference.md §Dual-Link Detection — Meeting Mode`](./reference.md#dual-link-detection--meeting-mode).
+
 ---
 
 ## §Daily Review (FR-006)
 
-≤ 3 CLI calls, ≤ 5s p95. Calls: (1) `obsidian tasks daily todo`, (2) `obsidian search query="#due/<today>" format=json`, (3) `obsidian search query="#status/active" path="<projects>" format=json`. Response: today's date, schedule, due-today, active projects (≤ 10 lines). Empty state: "Nothing scheduled today and no open tasks. Want me to start today's daily note?" Timeout > 4s: "This is taking longer than expected — continue?"
+≤ 3 CLI calls, ≤ 5s p95. Calls: (1) `obsidian tasks daily todo`, (2) `obsidian search query="due: <today-YYYY-MM-DD>" format=json`, (3) `obsidian search query="status/active" path="<projects>" format=json`. Note: search for `status/active` (no `#`) — this matches both the YAML frontmatter `tags: [project, status/active]` on new projects and legacy body-text `#status/active` on old projects. Response: today's date, schedule, due-today, active projects (≤ 10 lines). Empty state: "Nothing scheduled today and no open tasks. Want me to start today's daily note?" Timeout > 4s: "This is taking longer than expected — continue?"
 
 ---
 
