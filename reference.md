@@ -118,6 +118,8 @@ Two-phase evaluation. Inbox is always-available fallback.
 | 0.5 (check FIRST) | Content starts with or contains "meeting with", "call with", "sync with", "standup", "1:1", "catch-up with", "interview with" | **meeting** → create meeting note; run §Dual-Link Detection (meeting mode). If time anchor also present, additionally append `- [ ] HH:MM [[<meeting-slug>]]` to daily schedule |
 | 1 | Content contains explicit date/time anchor (no meeting keywords) | **schedule-item** |
 | 2 | Content begins with an action verb OR concrete noun implying a task — AND has no project reference AND no time anchor | **task** |
+| 2.5 | Content contains "decided to", "decision:", "we chose", "went with", "implementation decision", "architecture decision", "note the decision", "record this decision", "chose to", "we're going with" — fires even when a project is also referenced | **decision** → create with Decision Note Template (frontmatter MUST have `type: decision` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (decision mode) |
+| 2.6 | Content contains "add what we built", "add what we've built", "add what we've done", "add what we did", "note our implementation", "what we implemented", "document what we built", "add to notes under", "capture our progress", "log our work" — fires even when a project is also referenced | **implementation** → create with Implementation Note Template (frontmatter MUST have `type: implementation` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (implementation mode) |
 | 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** |
 | 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** → create with Note Template (frontmatter MUST have `type: permanent` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (note mode) |
 | 6 (fallback) | None of Rules 0.5–4 match | **inbox** |
@@ -133,13 +135,15 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 | meeting | `<notes>/<YYYY>/<slug>.md` | create with meeting note template; run §Dual-Link Detection (meeting mode) — populates `attendees`, `projects`; if time anchor present, also appends `- [ ] HH:MM [[<slug>]]` to daily schedule |
 | schedule-item | `<schedules_daily>/<target-date>.md` | append `- [ ] HH:MM <content>` |
 | task | `<schedules_daily>/<today>.md` | append `- [ ] <content>` (no time) |
+| decision | `<notes>/<YYYY>/<slug>.md` | create with Decision Note Template; if §Dual-Link Detection finds a project, use Decision Note Template (with project link) + append `- [[<decision-slug>]] — <one-line-summary>` to project's `## Decisions` section |
+| implementation | `<notes>/<YYYY>/<slug>.md` | create with Implementation Note Template; if §Dual-Link Detection finds a project, use Implementation Note Template (with project link) + append `- [[<impl-slug>]] — <one-line-summary>` to project's `## Notes` section |
 | project-update | `<projects>/<project-slug>.md` under `## Log` | append `- YYYY-MM-DD: <content>` |
 | note | `<notes>/<YYYY>/<slug>.md` | create with note template; if §Dual-Link Detection finds a project, use linked note template + append `- [[<note-slug>]] — <summary>` to project's `## Notes` |
 | inbox | `<inbox>/<inbox_file>` | append `- [YYYY-MM-DD HH:MM] <content>` |
 
 ---
 
-## §C.3 — Classification Test Table (acceptance: ≥ 13/15)
+## §C.3 — Classification Test Table (acceptance: ≥ 16/18)
 
 | # | Input | Rule | Expected Type | Expected Path |
 |---|---|---|---|---|
@@ -158,6 +162,9 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 | 13 | "capture: 1:1 with Alice" | 0.5 | meeting | `<notes>/<YYYY>/1-1-with-alice.md` |
 | 14 | "capture: sync with Bob tomorrow at 3pm" | 0.5 | meeting + schedule-item | `<notes>/<YYYY>/sync-with-bob.md` AND `<schedules_daily>/<tomorrow>.md` with `- [ ] 15:00 [[sync-with-bob]]` |
 | 15 | "capture: call with the design team about home-office-renovation" | 0.5 | meeting + project link | `<notes>/<YYYY>/call-with-design-team.md` with `projects: ["[[home-office-renovation]]"]` |
+| 16 | "decided to switch from Redux to Zustand in the store layer — hooks API is cleaner and bundle is 40% smaller. Risk: team needs to learn new patterns" | 2.5 | decision | `<notes>/<YYYY>/switch-from-redux-to-zustand.md` with Decision Note Template |
+| 17 | "decision: going with PostgreSQL over MongoDB for the home-office-renovation project — relational data fits better, easier to query across tables. Might need to revisit if write volume spikes" | 2.5 | decision + project link | `<notes>/<YYYY>/postgresql-over-mongodb.md` AND `<projects>/home-office-renovation.md` under `## Decisions` |
+| 18 | "add what we built to notes under home-office-renovation — refactored the budget calc into a shared util at utils/budget.ts, cleaner now but watch the rounding on fractional costs" | 2.6 | implementation + project link | `<notes>/<YYYY>/budget-calc-refactor.md` with `type: implementation` AND `<projects>/home-office-renovation.md` under `## Notes` |
 
 ---
 
@@ -264,7 +271,7 @@ Use Claude Code's `Write` tool with an absolute path. NOT shell redirection (`ec
 3. Write tool with that absolute path. Content (two lines terminated by newline):
    ```
    onboarded_at: <ISO-8601-timestamp>
-   skill_version: 0.1.0
+   skill_version: 0.4.0
    ```
 4. Claude Code's Write tool creates parent directories (`<home>/.eliot/`) automatically.
 5. On subsequent invocations, use the `Read` tool (not Bash) to check existence.
@@ -308,6 +315,8 @@ tags: [project, status/active]
 - [ ] 
 
 ## Log
+
+## Decisions
 
 ## Notes
 ```
@@ -451,6 +460,180 @@ says: ""
 ## Related Project
 [[<project-slug>]]
 ```
+
+### Decision Note Template
+
+Used when Rule 2.5 fires (content contains decision trigger keywords). Eliot fills sections from the user's message — does NOT ask for missing sections, leaves them blank.
+
+```markdown
+---
+id: <YYYYMMDDHHmm>
+created: <YYYY-MM-DD>
+type: decision
+status: accepted
+tags: [decision]
+up: []
+related: []
+says: ""
+---
+
+# <Decision Title>
+
+## Context
+<What situation led to this decision?>
+
+## Decision
+<What was decided — one clear statement.>
+
+## Where
+<Which files, components, or areas are affected?>
+
+## Why
+<The rationale — what made this the right call?>
+
+## Trade-offs
+<What do we give up or risk with this approach?>
+
+## Future Considerations
+<What might need revisiting later? What should a future reader watch out for?>
+```
+
+### Decision Note Template (with project link)
+
+Used when §Dual-Link Detection (decision mode) sets `related_project`.
+
+```markdown
+---
+id: <YYYYMMDDHHmm>
+created: <YYYY-MM-DD>
+type: decision
+status: accepted
+tags: [decision]
+up:
+  - "[[<project-slug>]]"
+related: []
+says: ""
+---
+
+# <Decision Title>
+
+## Context
+<What situation led to this decision?>
+
+## Decision
+<What was decided — one clear statement.>
+
+## Where
+<Which files, components, or areas are affected?>
+
+## Why
+<The rationale — what made this the right call?>
+
+## Trade-offs
+<What do we give up or risk with this approach?>
+
+## Future Considerations
+<What might need revisiting later? What should a future reader watch out for?>
+
+## Related Project
+[[<project-slug>]]
+```
+
+### Implementation Note Template
+
+Used when Rule 2.6 fires (content contains implementation trigger phrases). Eliot fills sections from the user's message — does NOT ask for missing sections, leaves them blank.
+
+```markdown
+---
+id: <YYYYMMDDHHmm>
+created: <YYYY-MM-DD>
+type: implementation
+tags: [implementation]
+up: []
+related: []
+says: ""
+---
+
+# <Implementation Title>
+
+## What Was Built
+<The change or feature, in plain terms.>
+
+## Where
+<Files, components, or areas affected.>
+
+## Why
+<The motivation — what problem does this solve?>
+
+## What's Good
+<Benefits: why this is the right shape, what works well.>
+
+## Watch Out For
+<Risks, gotchas, edge cases a future reader should know.>
+
+## Next Steps
+<Follow-ups or things left to do, if any.>
+```
+
+### Implementation Note Template (with project link)
+
+Used when §Dual-Link Detection (implementation mode) sets `related_project`.
+
+```markdown
+---
+id: <YYYYMMDDHHmm>
+created: <YYYY-MM-DD>
+type: implementation
+tags: [implementation]
+up:
+  - "[[<project-slug>]]"
+related: []
+says: ""
+---
+
+# <Implementation Title>
+
+## What Was Built
+<The change or feature, in plain terms.>
+
+## Where
+<Files, components, or areas affected.>
+
+## Why
+<The motivation — what problem does this solve?>
+
+## What's Good
+<Benefits: why this is the right shape, what works well.>
+
+## Watch Out For
+<Risks, gotchas, edge cases a future reader should know.>
+
+## Next Steps
+<Follow-ups or things left to do, if any.>
+
+## Related Project
+[[<project-slug>]]
+```
+
+`<one-line summary>` for the project-side append = first sentence of the "What Was Built" section, truncated to ~80 characters.
+
+### Dual-Link: Decision → Project-Side Append Format
+
+Appended to `<projects>/<related_project>.md` when §Dual-Link Detection fires for a **decision**. Use `obsidian append` — never rewrite the whole project file.
+
+Project **already has** `## Decisions` section:
+```
+- [[<decision-slug>]] — <one-line summary>
+```
+
+Project **has no** `## Decisions` section:
+```
+
+## Decisions
+- [[<decision-slug>]] — <one-line summary>
+```
+
+`<one-line summary>` = first sentence of the Decision section content, truncated to ~80 characters.
 
 ### Dual-Link: Note → Project-Side Append Format
 
