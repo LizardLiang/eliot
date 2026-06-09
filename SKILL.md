@@ -1,6 +1,6 @@
 ---
 name: eliot
-version: "0.4.0"
+version: "0.5.0"
 description: |
   Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap. Manages an Obsidian vault via the local obsidian CLI: captures notes into a single Obsidian folder (default `Eliot/`) holding Inbox, Notes, Projects, Plans, Schedules, and the Profile — nothing is scattered at the vault root. Maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
 user-invocable: true
@@ -89,7 +89,7 @@ After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1
 Use Claude Code `Write` tool (NOT shell redirection). Detect home: Windows = `$env:USERPROFILE`, macOS/Linux = `$HOME`. Write to `<home>/.eliot/onboarded`:
 ```
 onboarded_at: <ISO-8601>
-skill_version: 0.4.0
+skill_version: 0.5.0
 ```
 
 **Step 5 — Execute the user's task:**
@@ -141,13 +141,13 @@ Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op
 ## §/eliot status (FR-014)
 
 Response ≤ 12 lines. Steps:
-1. Version = `0.4.0` from frontmatter.
+1. Version = `0.5.0` from frontmatter.
 2. `Bash(obsidian vault)` → vault name + path.
 3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<root>/<inbox>') !== null, ... })` for all 5 subfolders. Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard). Fallback: `obsidian read path="<root>/<folder>/.empty"` per folder.
 4. `Bash(obsidian read path="<root>/Profile.md")`.
-5. Return: `Eliot 0.4.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, update memory, undo last write, /eliot help.`
+5. Return: `Eliot 0.5.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, update memory, undo last write, /eliot help.`
 
-Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.4.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
+Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.5.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
 
 ---
 
@@ -166,14 +166,14 @@ Two-phase procedure. Full table in [`reference.md §C.1`](./reference.md#c1--cla
 
 **Phase 2 — Priority scan (first match wins, applied only when Phase 1 did not fire):**
 
-Rules 2.5 and 2.6 take precedence over Rule 3 even when content also references a project — they produce a structured note with a project backlink rather than a bare log entry.
+Rules 2.5 and 2.6 take precedence over Rule 3 even when content also references a project — they use specialized templates (decision / implementation) rather than the generic Note Template.
 
 - **Rule 0.5 (check FIRST):** starts with or contains "meeting with", "call with", "sync with", "standup", "1:1", "catch-up with", "interview with" → **meeting** → `<notes>/<YYYY>/<slug>.md`, create with meeting note template from `reference.md §Templates`; run §Dual-Link Detection (meeting mode). If content also contains a time anchor, ADDITIONALLY append `- [ ] HH:MM [[<meeting-slug>]]` to `<schedules_daily>/<date>.md` (separate approval).
 - **Rule 1:** explicit date/time anchor (no meeting keywords) → **schedule-item** → `<schedules_daily>/<date>.md`, append `- [ ] HH:MM <content>`
 - **Rule 2:** starts with action verb OR concrete noun implying a task, with no project ref and no time anchor → **task** → today's daily note, append `- [ ] <content>`
 - **Rule 2.5:** contains "decided to", "decision:", "we chose", "went with", "implementation decision", "architecture decision", "note the decision", "record this decision", "chose to", "we're going with" → **decision** → `<notes>/<YYYY>/<slug>.md`, create with Decision Note Template from `reference.md §Templates`; run §Dual-Link Detection (decision mode). Extract Context/Decision/Where/Why/Trade-offs/Future Considerations from the user's message; leave sections blank when info wasn't given.
 - **Rule 2.6:** contains "add what we built", "add what we've built", "add what we've done", "add what we did", "note our implementation", "what we implemented", "document what we built", "add to notes under", "capture our progress", "log our work" → **implementation** → `<notes>/<YYYY>/<slug>.md`, create with Implementation Note Template from `reference.md §Templates`; run §Dual-Link Detection (implementation mode). Extract What Was Built/Where/Why/What's Good/Watch Out For/Next Steps from the user's message; leave sections blank when info wasn't given.
-- **Rule 3:** references existing project by name/wikilink → **project-update** → `<projects>/<slug>.md` under `## Log`, append `- YYYY-MM-DD: <content>`
+- **Rule 3:** references existing project by name/wikilink → **project-update** → create note in `<notes>/<YYYY>/<slug>.md` using Note Template (with project link); `related_project` is already known from the match — skip §Dual-Link Detection steps 1–3 and run from step 3.5 onward (fill `says`/`up`, create note, append link to project's `## Notes`). Project files hold only metadata (Goal, Tasks, status) — substantive content always lives in Notes/.
 - **Rule 4:** declarative ≥ 20 words or contains "I think"/"note that"/"TIL"/"idea:" → **note** → `<notes>/<YYYY>/<slug>.md`, create using the Note Template from `reference.md §Templates`. Frontmatter MUST include `type: permanent` and `id: <YYYYMMDDHHmm>` (12-digit timestamp) — never substitute `title:` or `tags: [note]`. Then run §Dual-Link Detection.
 - **Rule 6 (fallback):** none of Rules 0.5–4 match → **inbox** → `<inbox>/<inbox_file>`, append `- [YYYY-MM-DD HH:MM] <content>` · see [`reference.md §C.2`](./reference.md#c2--type--path-lookup)
 
@@ -181,8 +181,9 @@ Rules 2.5 and 2.6 take precedence over Rule 3 even when content also references 
 
 ## §Template Enforcement
 
-**MANDATORY:** Every `note`, `decision`, `implementation`, and `meeting` classification MUST produce a file built from the corresponding template in `reference.md §Templates`. Never write a raw paragraph or a commit-message-style summary in place of a template — that renders the note unsearchable and defeats the purpose.
+**MANDATORY:** Every `project-update`, `note`, `decision`, `implementation`, and `meeting` classification MUST produce a file built from the corresponding template in `reference.md §Templates`. Never write a raw paragraph or a commit-message-style summary in place of a template — that renders the note unsearchable and defeats the purpose.
 
+- **project-update**: use Note Template (with project link). `## The Idea` gets the user's content; `up` points to the project. The project file only receives a link in `## Notes` — never write content directly into a project file.
 - **implementation**: use Implementation Note Template. Fill What Was Built/Where/Why/What's Good/Watch Out For/Next Steps from the user's message. Leave a section blank (do not delete the heading) when info wasn't given.
 - **decision**: use Decision Note Template. Fill Context/Decision/Where/Why/Trade-offs/Future Considerations from the user's message. Same blank-not-deleted rule.
 - **note**: use Note Template. `## The Idea` gets the user's content verbatim; populate `## Why It Matters` if reasons were given.
@@ -210,7 +211,9 @@ Never write "(none provided)" or similar placeholder filler. A blank heading is 
 
 ## §Dual-Link Detection (FR-DL-001)
 
-Runs inside §Capture Flow when classification is **decision** (Rule 2.5), **implementation** (Rule 2.6), **note** (Rule 4), or **meeting** (Rule 0.5). Steps 1–5 below are shared; each mode lists only its deltas.
+Runs inside §Capture Flow when classification is **project-update** (Rule 3), **decision** (Rule 2.5), **implementation** (Rule 2.6), **note** (Rule 4), or **meeting** (Rule 0.5). Steps 1–5 below are shared; each mode lists only its deltas.
+
+**Project-update mode (Rule 3):** `related_project` is already known from the classification match — skip steps 1–3 entirely. Use Note Template (with project link); project-side append targets `## Notes` section using the existing Dual-Link: Note → Project-Side Append Format.
 
 **Decision mode:** use Decision Note Template (with project link when `related_project` is set); project-side append targets `## Decisions` section using the Dual-Link: Decision → Project-Side Append Format from `reference.md §Templates`.
 

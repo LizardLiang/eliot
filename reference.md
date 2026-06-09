@@ -120,7 +120,7 @@ Two-phase evaluation. Inbox is always-available fallback.
 | 2 | Content begins with an action verb OR concrete noun implying a task — AND has no project reference AND no time anchor | **task** |
 | 2.5 | Content contains "decided to", "decision:", "we chose", "went with", "implementation decision", "architecture decision", "note the decision", "record this decision", "chose to", "we're going with" — fires even when a project is also referenced | **decision** → create with Decision Note Template (frontmatter MUST have `type: decision` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (decision mode) |
 | 2.6 | Content contains "add what we built", "add what we've built", "add what we've done", "add what we did", "note our implementation", "what we implemented", "document what we built", "add to notes under", "capture our progress", "log our work" — fires even when a project is also referenced | **implementation** → create with Implementation Note Template (frontmatter MUST have `type: implementation` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (implementation mode) |
-| 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** |
+| 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** → create note in `<notes>/<YYYY>/<slug>.md` with Note Template (with project link); append link to project's `## Notes`. Project files hold only metadata |
 | 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** → create with Note Template (frontmatter MUST have `type: permanent` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (note mode) |
 | 6 (fallback) | None of Rules 0.5–4 match | **inbox** |
 
@@ -137,7 +137,7 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 | task | `<schedules_daily>/<today>.md` | append `- [ ] <content>` (no time) |
 | decision | `<notes>/<YYYY>/<slug>.md` | create with Decision Note Template; if §Dual-Link Detection finds a project, use Decision Note Template (with project link) + append `- [[<decision-slug>]] — <one-line-summary>` to project's `## Decisions` section |
 | implementation | `<notes>/<YYYY>/<slug>.md` | create with Implementation Note Template; if §Dual-Link Detection finds a project, use Implementation Note Template (with project link) + append `- [[<impl-slug>]] — <one-line-summary>` to project's `## Notes` section |
-| project-update | `<projects>/<project-slug>.md` under `## Log` | append `- YYYY-MM-DD: <content>` |
+| project-update | `<notes>/<YYYY>/<slug>.md` | create with Note Template (with project link); `related_project` already known — skip dual-link steps 1–3, run from step 3.5. Append `- [[<note-slug>]] — <one-line summary>` to `<projects>/<related_project>.md` under `## Notes` |
 | note | `<notes>/<YYYY>/<slug>.md` | create with note template; if §Dual-Link Detection finds a project, use linked note template + append `- [[<note-slug>]] — <summary>` to project's `## Notes` |
 | inbox | `<inbox>/<inbox_file>` | append `- [YYYY-MM-DD HH:MM] <content>` |
 
@@ -150,7 +150,7 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 | 1 | "capture: call the dentist tomorrow at 9" | 1 | schedule-item | `<schedules_daily>/<tomorrow>.md` |
 | 2 | "capture: pick up dry-cleaning Friday" | 1 | schedule-item | `<schedules_daily>/<Friday>.md` |
 | 3 | "capture: email Mom" | 2 | task | `<schedules_daily>/<today>.md` |
-| 4 | "capture: home-office-renovation: picked the paint, eggshell white" | 3 | project-update | `<projects>/home-office-renovation.md` under `## Log` |
+| 4 | "capture: home-office-renovation: picked the paint, eggshell white" | 3 | project-update | `<notes>/<YYYY>/picked-the-paint-eggshell-white.md` (linked to `[[home-office-renovation]]`) AND `<projects>/home-office-renovation.md` under `## Notes` |
 | 5 | "capture: home-office-renovation needs to be done by next Friday" | 5 (tie) | schedule-item + project link | `<schedules_daily>/<next-Friday>.md` with `[[home-office-renovation]]` |
 | 6 | "capture: idea: rust's borrow checker is basically affine types in disguise" | 4 | note | `<notes>/<YYYY>/borrow-checker-affine-types.md` |
 | 7 | "capture: I think the new linter is faster because it skips type-check on unchanged files" | 4 | note | `<notes>/<YYYY>/<slug>.md` |
@@ -271,7 +271,7 @@ Use Claude Code's `Write` tool with an absolute path. NOT shell redirection (`ec
 3. Write tool with that absolute path. Content (two lines terminated by newline):
    ```
    onboarded_at: <ISO-8601-timestamp>
-   skill_version: 0.4.0
+   skill_version: 0.5.0
    ```
 4. Claude Code's Write tool creates parent directories (`<home>/.eliot/`) automatically.
 5. On subsequent invocations, use the `Read` tool (not Bash) to check existence.
@@ -313,8 +313,6 @@ tags: [project, status/active]
 
 ## Tasks
 - [ ] 
-
-## Log
 
 ## Decisions
 
