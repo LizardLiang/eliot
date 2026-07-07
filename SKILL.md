@@ -1,10 +1,10 @@
 ---
 name: eliot
-version: "0.5.0"
+version: "0.6.0"
 description: |
-  Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap. Manages an Obsidian vault via the local obsidian CLI: captures notes into a single Obsidian folder (default `Eliot/`) holding Inbox, Notes, Projects, Plans, Schedules, and the Profile — nothing is scattered at the vault root. Maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
+  Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap, /eliot tidy. Manages an Obsidian vault via the local obsidian CLI: captures notes into a single Obsidian folder (default `Eliot/`) holding Inbox, Notes, Projects, Plans, Schedules, and the Profile — nothing is scattered at the vault root. Maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
 user-invocable: true
-argument-hint: "[status | help | brief | wrap]"
+argument-hint: "[status | help | brief | wrap | tidy]"
 allowed-tools: >-
   Bash(obsidian vault),
   Bash(obsidian vaults),
@@ -89,7 +89,7 @@ After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1
 Use Claude Code `Write` tool (NOT shell redirection). Detect home: Windows = `$env:USERPROFILE`, macOS/Linux = `$HOME`. Write to `<home>/.eliot/onboarded`:
 ```
 onboarded_at: <ISO-8601>
-skill_version: 0.5.0
+skill_version: 0.6.0
 ```
 
 **Step 5 — Execute the user's task:**
@@ -114,23 +114,41 @@ For the folder about to be used:
 3. No match → create folder with canonical name after user consents. Never silently create.
 4. Record outcome in `<root>/Profile.md ## Vault Layout` (schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema)).
 
-**A3 Daily-Notes plugin reconciliation** (runs lazily, first time a daily note is written):
-1. `obsidian eval code="JSON.stringify(app.internalPlugins.plugins['daily-notes'].instance.options)"` — requires per-invocation approval (eval can mutate vault state).
-2. If plugin returns a folder path, adopt as `schedules_daily` in vault_layout (silent).
-3. Fallback T1 (eval errors): ask user for daily notes folder.
-4. Fallback T2 (user doesn't know): assume `Schedules/Daily/` and surface: "I'll default to `Schedules/Daily/`. You can correct anytime with `eliot, my daily notes live in <path>`."
+**A3 Daily-notes folder resolution** (runs lazily, first time a daily note is written): schedules always resolve to `<schedules_daily>/` (resolved default `Eliot/Schedules/Daily/`) via the standard steps 1–3 above (exact match → synonym table → create-with-consent). The Daily Notes plugin configuration is never consulted for Eliot writes — a plugin-adopted folder outside `<root>/` is not used. A previously plugin-adopted `schedules_daily` value from a pre-0.6.0 Profile.md is corrected via §Tidy Strays, not at write time. Full detail in [`reference.md §A3`](./reference.md#a3--schedule-model-daily-notes-plugin-decoupled).
 
 ---
 
 ## §Path Resolution
 
-Resolve vault paths from Profile.md `vault_layout:` first; fallback to canonical defaults. All folder values are **relative to `<root>`**. Defaults: `root=Eliot`, `inbox=Inbox`, `inbox_file=Inbox.md`, `notes=Notes`, `notes_subdir_template=YYYY`, `projects=Projects`, `plans=Plans`, `schedules_daily=Schedules/Daily`, `schedules_daily_filename=YYYY-MM-DD.md`. Profile.md lives at `<root>/Profile.md`. If `root` is empty, paths are vault-root-relative (legacy mode). Full schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema) — includes sanitization rules for values used in `obsidian eval`. Never hard-code vault paths.
+Every placeholder used anywhere in this file or `reference.md` — `<inbox>`, `<notes>`, `<projects>`, `<plans>`, `<schedules_daily>`, and `<root>` itself — is **already root-resolved**: it denotes the full vault-relative path, never a bare folder name to be prefixed later. `<notes>` ≡ `<root>/<notes-value>` (resolved default `Eliot/Notes`), not the bare `Notes` folder name. This applies identically to reads (`obsidian read path=`, `obsidian search query="..." path=`, `obsidian backlinks`) and writes (`obsidian create`, `obsidian append`, `obsidian property:set`, `obsidian template:insert`) — there is no read/write distinction in how a placeholder resolves.
+
+Resolve from Profile.md `vault_layout:` first; fallback to canonical defaults. Defaults and resolved forms (assuming default `root=Eliot`):
+- `<root>` = `root` value, default `Eliot`
+- `<inbox>` = `<root>/<inbox-value>`, default `Eliot/Inbox`; `<inbox_file>` = `Inbox.md`
+- `<notes>` = `<root>/<notes-value>`, default `Eliot/Notes` (subdirs by `notes_subdir_template`, default `YYYY`)
+- `<projects>` = `<root>/<projects-value>`, default `Eliot/Projects`
+- `<plans>` = `<root>/<plans-value>`, default `Eliot/Plans`
+- `<schedules_daily>` = `<root>/<schedules_daily-value>`, default `Eliot/Schedules/Daily`
+
+Profile.md itself lives at `<root>/Profile.md` (default `Eliot/Profile.md`). If `root` is empty, paths are vault-root-relative (legacy mode) — see §Path Enforcement exception. Full schema in [`reference.md §A1.3`](./reference.md#a13--vault_layout-schema) — includes sanitization rules for values used in `obsidian eval`. Never hard-code vault paths; never construct a write or read path from a bare folder name without the `<root>/` prefix.
+
+---
+
+## §Path Enforcement
+
+**MANDATORY:** Before every `obsidian create`, `obsidian append`, `obsidian property:set`, or `obsidian template:insert` call, verify the target path begins with `<root>/` (resolved default `Eliot/`). If it doesn't, STOP — do not call the CLI — and re-resolve the path from `<root>/Profile.md` `vault_layout` (§Path Resolution) once before retrying. If the re-resolved path still doesn't begin with `<root>/`, stop and surface: "I can't resolve a valid path under `<root>/` — check `vault_layout` in Profile.md." Never retry more than once.
+
+This guard applies to every write path in this file: §Capture Flow, §Dual-Link Detection (note- and project-side appends), §Projects and Plans, §Memory, §Weekly Review/Inbox Triage/Templates, and §Tidy Strays moves.
+
+**Exception:** `vault_layout.root: ""` (legacy vault-root mode) — paths are intentionally vault-root-relative; the guard is satisfied trivially in this mode.
+
+Never construct a write target from "today's daily note", "the plugin's daily folder", or any other unresolved reference — always resolve to the fully root-prefixed placeholder first (§Path Resolution).
 
 ---
 
 ## §Last-Write Record (FR-015)
 
-Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op, content }`. Bulk-triage entry (one slot): `{ ts, op:"bulk-triage", batch_size, items:[...] }`. Dual-link entry (one slot): `{ ts, op:"dual-link", items:[...] }` — see §Dual-Link Detection. Evict oldest on overflow. Lost on session end (documented v1 limit).
+Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op, content }`. Bulk-triage entry (one slot): `{ ts, op:"bulk-triage", batch_size, items:[...] }`. Dual-link entry (one slot): `{ ts, op:"dual-link", items:[...] }` — see §Dual-Link Detection. Tidy-strays entry (one slot): `{ ts, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }` — see §Tidy Strays. Evict oldest on overflow. Lost on session end (documented v1 limit).
 
 **Trigger phrases:** "undo that", "undo the last capture", "fix the last write", "what did you just write", "show last write".
 
@@ -141,19 +159,19 @@ Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op
 ## §/eliot status (FR-014)
 
 Response ≤ 12 lines. Steps:
-1. Version = `0.5.0` from frontmatter.
+1. Version = `0.6.0` from frontmatter.
 2. `Bash(obsidian vault)` → vault name + path.
-3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<root>/<inbox>') !== null, ... })` for all 5 subfolders. Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard). Fallback: `obsidian read path="<root>/<folder>/.empty"` per folder.
+3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<inbox>') !== null, ... })` for all 5 subfolders (placeholders already root-resolved, §Path Resolution). Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard). Fallback: `obsidian read path="<folder>/.empty"` per folder.
 4. `Bash(obsidian read path="<root>/Profile.md")`.
-5. Return: `Eliot 0.5.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, update memory, undo last write, /eliot help.`
+5. Return: `Eliot 0.6.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, update memory, undo last write, /eliot help.`
 
-Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.5.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
+Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.6.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
 
 ---
 
 ## §/eliot help (FR-017)
 
-≤ 25 lines. Five categories: **Capture & schedule** (capture:, schedule at), **Review** (what's on my plate, last week, where did I write), **Projects & plans** (start project, project status, start plan), **Memory** (remember:, update routine, forget), **Maintenance** (/eliot status, undo that, triage my inbox). Plus `/eliot brief` and `/eliot wrap` (P2). One example phrase per category.
+≤ 25 lines. Five categories: **Capture & schedule** (capture:, schedule at), **Review** (what's on my plate, last week, where did I write), **Projects & plans** (start project, project status, start plan), **Memory** (remember:, update routine, forget), **Maintenance** (/eliot status, undo that, triage my inbox, tidy strays). Plus `/eliot brief` and `/eliot wrap` (P2). One example phrase per category.
 
 ---
 
@@ -170,7 +188,7 @@ Rules 2.5 and 2.6 take precedence over Rule 3 even when content also references 
 
 - **Rule 0.5 (check FIRST):** starts with or contains "meeting with", "call with", "sync with", "standup", "1:1", "catch-up with", "interview with" → **meeting** → `<notes>/<YYYY>/<slug>.md`, create with meeting note template from `reference.md §Templates`; run §Dual-Link Detection (meeting mode). If content also contains a time anchor, ADDITIONALLY append `- [ ] HH:MM [[<meeting-slug>]]` to `<schedules_daily>/<date>.md` (separate approval).
 - **Rule 1:** explicit date/time anchor (no meeting keywords) → **schedule-item** → `<schedules_daily>/<date>.md`, append `- [ ] HH:MM <content>`
-- **Rule 2:** starts with action verb OR concrete noun implying a task, with no project ref and no time anchor → **task** → today's daily note, append `- [ ] <content>`
+- **Rule 2:** starts with action verb OR concrete noun implying a task, with no project ref and no time anchor → **task** → `<schedules_daily>/<today>.md`, append `- [ ] <content>`
 - **Rule 2.5:** contains "decided to", "decision:", "we chose", "went with", "implementation decision", "architecture decision", "note the decision", "record this decision", "chose to", "we're going with" → **decision** → `<notes>/<YYYY>/<slug>.md`, create with Decision Note Template from `reference.md §Templates`; run §Dual-Link Detection (decision mode). Extract Context/Decision/Where/Why/Trade-offs/Future Considerations from the user's message; leave sections blank when info wasn't given.
 - **Rule 2.6:** contains "add what we built", "add what we've built", "add what we've done", "add what we did", "note our implementation", "what we implemented", "document what we built", "add to notes under", "capture our progress", "log our work" → **implementation** → `<notes>/<YYYY>/<slug>.md`, create with Implementation Note Template from `reference.md §Templates`; run §Dual-Link Detection (implementation mode). Extract What Was Built/Where/Why/What's Good/Watch Out For/Next Steps from the user's message; leave sections blank when info wasn't given.
 - **Rule 3:** references existing project by name/wikilink → **project-update** → create note in `<notes>/<YYYY>/<slug>.md` using Note Template (with project link); `related_project` is already known from the match — skip §Dual-Link Detection steps 1–3 and run from step 3.5 onward (fill `says`/`up`, create note, append link to project's `## Notes`). Project files hold only metadata (Goal, Tasks, status) — substantive content always lives in Notes/.
@@ -264,7 +282,7 @@ For the meeting-mode procedure (attendee extraction, project link, schedule writ
 
 ## §Daily Review (FR-006)
 
-≤ 3 CLI calls, ≤ 5s p95. Calls: (1) `obsidian tasks daily todo`, (2) `obsidian search query="due: <today-YYYY-MM-DD>" format=json`, (3) `obsidian search query="status/active" path="<projects>" format=json`. Note: search for `status/active` (no `#`) — this matches both the YAML frontmatter `tags: [project, status/active]` on new projects and legacy body-text `#status/active` on old projects. Response: today's date, schedule, due-today, active projects (≤ 10 lines). Empty state: "Nothing scheduled today and no open tasks. Want me to start today's daily note?" Timeout > 4s: "This is taking longer than expected — continue?"
+≤ 3 CLI calls, ≤ 5s p95. Calls: (1) `obsidian read path="<schedules_daily>/<today>.md"` — extract open checkbox lines (`- [ ]`) as today's tasks; replaces the plugin-coupled `tasks daily todo` subcommand (Daily Notes plugin is never consulted for this read); if the file doesn't exist yet, treat it the same as an empty daily note (no error) — falls through to the Empty state below, (2) `obsidian search query="due: <today-YYYY-MM-DD>" format=json`, (3) `obsidian search query="status/active" path="<projects>" format=json`. Note: search for `status/active` (no `#`) — this matches both the YAML frontmatter `tags: [project, status/active]` on new projects and legacy body-text `#status/active` on old projects. Response: today's date, schedule, due-today, active projects (≤ 10 lines). Empty state: "Nothing scheduled today and no open tasks. Want me to start today's daily note?" Timeout > 4s: "This is taking longer than expected — continue?"
 
 ---
 
@@ -301,9 +319,30 @@ Append-style additions (new bullet to existing section): use `obsidian append`, 
 
 **Templates (FR-023):** Try `obsidian template:insert` first. Fallback: inline templates from `reference.md §Templates` silently.
 
-**`/eliot brief` (FR-031, P2):** today's schedule + top 3 open tasks + 1 deep-work focus from most-recently-edited project. ≤ 10 lines.
+**`/eliot brief` (FR-031, P2):** today's schedule + top 3 open tasks (from `<schedules_daily>/<today>.md`, same explicit-path read as §Daily Review) + 1 deep-work focus from most-recently-edited project. ≤ 10 lines.
 
-**`/eliot wrap` (FR-032, P2):** Append EOD log section (done + rolled-over tasks) to today's daily note via `obsidian daily:append` (approval required).
+**`/eliot wrap` (FR-032, P2):** Append EOD log section (done + rolled-over tasks) to `<schedules_daily>/<today>.md` via `obsidian append path="<schedules_daily>/<today>.md"` (approval required). If the daily note doesn't exist yet, create stub first per §Capture Flow's "Missing daily note" step, then append.
+
+---
+
+## §Tidy Strays
+
+Trigger phrases: "eliot, tidy strays", "/eliot tidy". One-time (or occasional) cleanup of vault-root files that predate root-enforcement, or that a plugin (e.g. Daily Notes) wrote outside `<root>/`.
+
+1. Scan vault-root `Inbox`/`Inbox.md`, `Notes/`, `Projects/`, `Plans/`, `Schedules/` — i.e. folders/files with these names existing directly under the vault root, NOT under `<root>/` — for files carrying Eliot-created frontmatter: `type` ∈ `permanent`/`decision`/`implementation`/`meeting`/`project`/`plan`/`daily` AND an Eliot `id` (`<YYYYMMDDHHmm>`), `created` (`<YYYY-MM-DD>`), or `date` (`<YYYY-MM-DD>`) key (meeting/daily notes use `date`, not `id`/`created`). Full heuristic in [`reference.md §Tidy Strays — Procedure Detail`](./reference.md#tidy-strays--procedure-detail).
+2. Also read `<root>/Profile.md` `vault_layout` and check whether any folder value resolves outside `<root>/` (e.g. a pre-0.6.0 plugin-adopted `schedules_daily`, per §A3). Flag it for correction alongside the stray files.
+3. Propose a single numbered move list: `<N>. <stray-path> → <root>/<target-subpath>` (e.g. `Notes/2026/foo.md → Eliot/Notes/2026/foo.md`), where `<target-subpath>` is the §C.2 type→path mapping (`reference.md §C.2`) with its `<root>/` prefix stripped — §C.2's paths already resolve to `<root>/...`, so do not prefix a second time. Wait for confirmation before any write.
+4. On bulk confirm, move each file **one at a time** via `obsidian eval code="app.fileManager.renameFile(app.vault.getAbstractFileByPath('<stray-path>'), '<root>/<target-subpath>')"` (per-invocation approval; sanitize every interpolated path per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard) — the same rule that governs folder-check evals applies to `renameFile` arguments). `renameFile` updates wikilinks automatically.
+   - **Batch-execution rule:** never abort the whole batch over one item. For each item, record its outcome as one of `moved` | `skipped-declined` | `skipped-missing` | `failed`, then continue to the next item:
+     - File no longer exists at `<stray-path>` when its move is attempted (`app.vault.getAbstractFileByPath` returns null) → `skipped-missing`.
+     - Per-invocation approval for that item's `obsidian eval` is declined → `skipped-declined`.
+     - The eval call errors → retry that single item once; if it still fails → `failed`. Never retry an item more than once.
+     - Otherwise → `moved`.
+5. If step 2 flagged a `vault_layout` value, propose its correction via the §7a rewrite procedure.
+6. Record the whole batch as ONE last-write ring-buffer entry: `{ ts, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }` — `status` ∈ `moved` | `skipped-declined` | `skipped-missing` | `failed`, mirroring the `bulk-triage` entry conventions in [`reference.md §3.3`](./reference.md#33--last-write-record-bulk-triage-entry-shape) — see §Last-Write Record. Confirm with per-status counts: "Moved <M>, skipped <S>, failed <F> of <N>." Undo prompt (only if M > 0): "Undo the <M> moved files, pick specific ones, or cancel?" — undo offers only items with `status: moved`; skipped/failed items are not undo candidates.
+7. If `obsidian eval` is unavailable or the app isn't running before any move is attempted, do not fall back to a filesystem move (§Error Handling and Security) — degrade to printing the confirmed move list for manual action. If `obsidian eval` becomes unavailable partway through the batch, mark every not-yet-attempted item `failed`, stop attempting further moves, and proceed to step 6 with the statuses gathered so far.
+
+Empty state (no strays found): "No stray files outside `Eliot/` — everything's already tidy."
 
 ---
 
@@ -313,7 +352,7 @@ Append-style additions (new bullet to existing section): use `obsidian append`, 
 
 **Destructive ops:** show diff/preview + confirm BEFORE calling CLI. Pre-approval never covers destructive ops.
 
-**Not pre-approved (require per-invocation approval):** `obsidian create`, `obsidian append`, `obsidian daily:append`, `obsidian property:set`, `obsidian template:insert`, `obsidian eval` (eval can mutate vault state — this note is repeated here intentionally), `obsidian search:context` (unverified subcommand).
+**Not pre-approved (require per-invocation approval):** `obsidian create`, `obsidian append`, `obsidian property:set`, `obsidian template:insert`, `obsidian eval` (eval can mutate vault state — this note is repeated here intentionally), `obsidian search:context` (unverified subcommand). `obsidian daily:append`/`daily:read`/`tasks daily todo` are no longer used by Eliot (§Path Enforcement, §A3) — see `reference.md §CLI Verification` for their catalog status.
 
 **No network calls.** Never emit WebFetch, curl, HTTP, or fetch(). NFR-Privacy enforced by omission.
 

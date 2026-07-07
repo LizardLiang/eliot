@@ -5,7 +5,7 @@
       "id": 1,
       "name": "rule5-tiebreaker",
       "prompt": "capture: home renovation project needs a contractor meeting on Thursday at 2pm",
-      "expected_output": "Classifies as schedule-item via Rule 5 tie-breaker (both time anchor AND project ref present). Appends [[home-renovation-project]] to the item. Writes to schedules_daily/<Thursday>.md. Confirms with ≤2 sentences.",
+      "expected_output": "Classifies as schedule-item via Rule 5 tie-breaker (both time anchor AND project ref present). Appends [[home-renovation-project]] to the item. Writes to `Eliot/Schedules/Daily/<Thursday>.md` (root-prefixed — never a bare `Schedules/Daily/...`). Confirms with ≤2 sentences naming the full Eliot/-prefixed path.",
       "files": [],
       "assertions": [
         {
@@ -23,8 +23,8 @@
         {
           "id": "1c",
           "name": "targets-thursday-daily-note",
-          "description": "Target path is a daily note for Thursday, not Projects/ or Notes/",
-          "check": "trace.txt or response.txt shows a path under Schedules/Daily/ or equivalent, targeting Thursday"
+          "description": "Target path is a daily note for Thursday under the Eliot/ root, not Projects/ or Notes/, and not a bare Schedules/Daily/ without the Eliot/ prefix",
+          "check": "trace.txt or response.txt shows a path under Eliot/Schedules/Daily/ targeting Thursday; FAILS if the path shown is bare 'Schedules/Daily/...' without the 'Eliot/' prefix"
         },
         {
           "id": "1d",
@@ -49,9 +49,9 @@
       "assertions": [
         {
           "id": "2a",
-          "name": "attempts-tasks-daily-todo",
-          "description": "Attempts obsidian tasks daily todo (CLI call #1)",
-          "check": "trace.txt mentions 'tasks daily todo' or 'daily todo'"
+          "name": "attempts-explicit-schedule-read",
+          "description": "Attempts obsidian read path=\"Eliot/Schedules/Daily/<today>.md\" (CLI call #1, explicit root-prefixed path) — the plugin-coupled 'tasks daily todo' subcommand is no longer used (§A3 decoupling)",
+          "check": "trace.txt mentions 'read' and ('Eliot/Schedules/Daily' or 'schedules_daily'); FAILS if the only call shown is 'tasks daily todo'"
         },
         {
           "id": "2b",
@@ -83,7 +83,7 @@
       "id": 3,
       "name": "note-capture",
       "prompt": "capture: I think the reason our standups always run over is because we don't timebox individual updates — people drift into problem-solving mode instead of just stating status",
-      "expected_output": "Rule 4 fires (≥20 words + 'I think') → note → Notes/<YYYY>/<slug>.md. No clarifying questions. Confirmation ≤2 sentences naming exact file.",
+      "expected_output": "Rule 4 fires (≥20 words + 'I think') → note → `Eliot/Notes/<YYYY>/<slug>.md` (root-prefixed — never a bare `Notes/...`). No clarifying questions. Confirmation ≤2 sentences naming the exact root-prefixed file.",
       "files": [],
       "assertions": [
         {
@@ -95,8 +95,8 @@
         {
           "id": "3b",
           "name": "targets-notes-folder",
-          "description": "Target path is under Notes/ (not Schedules/ or Projects/ or Inbox/)",
-          "check": "trace.txt or response.txt shows path under 'Notes/' or equivalent notes folder"
+          "description": "Target path is under Eliot/Notes/ (not bare Notes/, and not Schedules/ or Projects/ or Inbox/)",
+          "check": "trace.txt or response.txt shows path under 'Eliot/Notes/'; FAILS if the path shown is bare 'Notes/...' without the 'Eliot/' prefix"
         },
         {
           "id": "3c",
@@ -115,6 +115,33 @@
           "name": "no-unnecessary-clarification",
           "description": "Does not ask clarifying questions (input is unambiguous for Rule 4)",
           "check": "response.txt does not contain a question mark as a clarification request"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "plugin-escape-schedule-capture",
+      "prompt": "capture: dentist tomorrow at 9",
+      "expected_output": "Rule 1 fires → schedule-item. Even when the vault's Daily Notes plugin is configured to a folder outside Eliot/ (e.g. 'Daily Notes/'), Eliot never consults that plugin config for this write (§A3 decoupling) and still resolves schedules_daily from vault_layout, landing the item in `Eliot/Schedules/Daily/<tomorrow>.md`. Confirms with the full Eliot/-prefixed path.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "4a",
+          "name": "writes-inside-eliot-root",
+          "description": "Target write path begins with Eliot/Schedules/Daily/, not a bare 'Daily Notes/' or an un-prefixed 'Schedules/Daily/'",
+          "check": "trace.txt or response.txt shows path 'Eliot/Schedules/Daily/'; FAILS if the path shown is 'Daily Notes/' or bare 'Schedules/Daily/' without the 'Eliot/' prefix"
+        },
+        {
+          "id": "4b",
+          "name": "no-plugin-eval-consulted",
+          "description": "Does not call obsidian eval to read daily-notes plugin options for this write (plugin config is not authoritative — §A3)",
+          "check": "trace.txt does not mention 'internalPlugins' or a daily-notes plugin config lookup for this capture"
+        },
+        {
+          "id": "4c",
+          "name": "confirmation-shows-full-path",
+          "description": "Confirmation names the full Eliot/-prefixed path (voice rule from examples/dialogues.md Notes on Voice)",
+          "check": "response.txt contains 'Eliot/Schedules/Daily/' in the confirmation line"
         }
       ]
     }

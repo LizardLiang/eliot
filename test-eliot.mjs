@@ -25,6 +25,7 @@ console.log(`Skill installed → ${SKILLS_DIR}\n`);
 
 const OPTS = {
   cwd: __dir,
+  model: "claude-sonnet-5",
   skills: ["eliot"],
   allowedTools: ["Bash(obsidian *)", "Write", "Read", "Glob"],
   permissionMode: "bypassPermissions",
@@ -86,7 +87,7 @@ const EVALS = [
     prompt: "capture: I think the reason our standups always run over is because we don't timebox individual updates — people drift into problem-solving mode instead of just stating status",
     assertions: {
       "Classified as note (not task/inbox)": (o) => /note|Notes\//i.test(o),
-      "Targets Notes/ folder": (o) => o.includes("Notes/"),
+      "Targets Eliot/Notes/ (root-prefixed)": (o) => o.includes("Eliot/Notes/"),
       "Slug derived from content": (o) => /standup|timebox/i.test(o),
       "No unnecessary clarifying question": (o) => (o.match(/\?/g) ?? []).length <= 1,
     },
