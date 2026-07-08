@@ -138,7 +138,13 @@ async function main() {
   console.log(`\nOverall: ${allPassed}/${allTotal}`);
 }
 
-main().catch((err) => {
+let exitCode = 0;
+try {
+  await main();
+} catch (err) {
   console.error("Fatal:", err);
-  process.exit(1);
-});
+  exitCode = 1;
+} finally {
+  rmSync(SKILLS_DIR, { recursive: true, force: true });
+}
+process.exit(exitCode);

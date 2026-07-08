@@ -61,18 +61,16 @@ Obsidian vault/
 ```bash
 npm install @anthropic-ai/claude-agent-sdk
 node test-eliot.mjs
+node test-templates.mjs
+node test-dual-link.mjs
 ```
 
-Note: `test-eliot.mjs` deletes and regenerates `.claude/skills/eliot/` from the repo-root skill files on every run — that copy is a build artifact, never hand-edit it.
+Each script installs the skill into `.claude/skills/eliot/` from the repo-root `SKILL.md`/`reference.md`/`examples/dialogues.md` before running, and removes that install directory afterward (pass or fail) — it's a disposable build artifact, never hand-edit it, and it should never survive a test run.
 
 ## Release
 
-1. **Bump the version** — it appears in ~6 places; grep the old version string to catch all of them:
-   ```bash
-   grep -rn "<old-version>" SKILL.md reference.md
-   ```
-   (SKILL.md frontmatter, §Silent Setup sentinel content, §/eliot status ×3, reference.md §3.2.)
-2. **Run the eval suite** (also refreshes `.claude/skills/eliot/`):
+1. **Bump the version** — the frontmatter `version:` field in `SKILL.md` is the single source of truth. Every other in-file mention (sentinel content, `/eliot status` output, `reference.md` §3.2) reads `<version from frontmatter>` and needs no manual edit.
+2. **Run the eval suite** (also refreshes and then removes `.claude/skills/eliot/`):
    ```bash
    node test-eliot.mjs
    ```

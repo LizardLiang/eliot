@@ -18,7 +18,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const SKILL_SRC = join(process.env.USERPROFILE, ".claude", "skills", "eliot");
+const SKILL_SRC = __dir;
 
 const SKILLS_DIR = join(__dir, ".claude", "skills", "eliot");
 rmSync(SKILLS_DIR, { recursive: true, force: true });
@@ -153,10 +153,16 @@ async function main() {
   }
   console.log(`\nOverall: ${allPassed}/${allTotal}`);
 
-  if (allPassed < allTotal) process.exit(1);
+  return allPassed < allTotal ? 1 : 0;
 }
 
-main().catch((err) => {
+let exitCode = 0;
+try {
+  exitCode = await main();
+} catch (err) {
   console.error("Fatal:", err);
-  process.exit(1);
-});
+  exitCode = 1;
+} finally {
+  rmSync(SKILLS_DIR, { recursive: true, force: true });
+}
+process.exit(exitCode);
