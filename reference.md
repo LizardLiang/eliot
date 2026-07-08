@@ -20,7 +20,7 @@ Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/
 | 7 | `obsidian tasks todo [verbose] [format=json]` | VERIFIED | All open tasks across vault |
 | 8 | `obsidian property:get name="<n>" file="<p>"` | VERIFIED | Read a frontmatter property |
 | 9 | `obsidian daily:read` | VERIFIED | not used — follows plugin folder, may escape root. Replaced by `obsidian read path="<schedules_daily>/<date>.md"` |
-| 10 | `obsidian eval code="<js>"` | VERIFIED | Runs JS in Obsidian renderer context. NOT pre-approved — destructive potential. Requires per-invocation approval. Use only for: (a) folder existence probe, (b) §Tidy Strays file moves via `app.fileManager.renameFile`. Daily-notes plugin config is no longer queried (§A3). |
+| 10 | `obsidian eval code="<js>"` | VERIFIED | Runs JS in Obsidian renderer context. NOT pre-approved — destructive potential. Requires per-invocation approval. Use only for: (a) folder existence probe, (b) §Tidy Strays file moves via `app.fileManager.renameFile`, (c) §Doctor fixes via `app.fileManager.trashFile` (move to Obsidian trash — never hard delete). Daily-notes plugin config is no longer queried (§A3). |
 | 11 | `obsidian create name="<n>" [path="<p>"] [content="<c>"] [silent] [overwrite]` | VERIFIED | Creates a note. `silent` = no auto-open. `overwrite` = replace existing. NOT pre-approved. |
 | 12 | `obsidian append file="<n>" content="<c>"` or `path="<p>"` | VERIFIED | Appends text to existing file. NOT pre-approved. |
 | 13 | `obsidian daily:append content="<c>"` | VERIFIED | not used — follows plugin folder, may escape root. Replaced by `obsidian append path="<schedules_daily>/<date>.md"` |
@@ -140,8 +140,10 @@ Two-phase evaluation. Inbox is always-available fallback.
 | 2.5 | Content contains "decided to", "decision:", "we chose", "went with", "implementation decision", "architecture decision", "note the decision", "record this decision", "chose to", "we're going with" — fires even when a project is also referenced | **decision** → create with Decision Note Template (frontmatter MUST have `type: decision` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (decision mode) |
 | 2.6 | Content contains "add what we built", "add what we've built", "add what we've done", "add what we did", "note our implementation", "what we implemented", "document what we built", "add to notes under", "capture our progress", "log our work" — fires even when a project is also referenced | **implementation** → create with Implementation Note Template (frontmatter MUST have `type: implementation` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (implementation mode) |
 | 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** → create note in `<notes>/<YYYY>/<slug>.md` with Note Template (with project link); append link to project's `## Notes`. Project files hold only metadata |
-| 4 | Content is declarative/descriptive ≥ 20 words OR contains "I think", "note that", "TIL", "idea:" | **note** → create with Note Template (frontmatter MUST have `type: permanent` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (note mode) |
-| 6 (fallback) | None of Rules 0.5–4 match | **inbox** |
+| 4 | Content is declarative/descriptive AND passes the **substance gate** below | **note** → create with Note Template (frontmatter MUST have `type: permanent` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (note mode) |
+| 6 (fallback) | None of Rules 0.5–4 match, or Rule 4 fired but the substance gate failed | **inbox** |
+
+**Rule 4 substance gate:** a declarative thought becomes a permanent note only if it states an idea AND at least one of: (i) a reason or mechanism ("because", "since", cause→effect reasoning), (ii) an explicit connection to another topic, note, or project, (iii) ≥ ~25 words of elaboration. Explicit markers "TIL", "idea:", "note:" always qualify — the user's intent is explicit. **Gate fails** → route to inbox (Rule 6 mechanics) and confirm: "Parked in Inbox — say 'make it a note' to promote." On "make it a note" (or "promote #N"), create the permanent note from the inbox line via the Note Template, then remove the inbox line (both writes approved).
 
 ---
 
@@ -162,9 +164,56 @@ All `<placeholder>` paths below resolve to `<root>/<value>` (e.g., `<projects>` 
 
 ---
 
-## §C.3 — Classification Test Table (acceptance: ≥ 16/18)
+## §Create Guard — Pre-Create Existence Check
 
-Resolved Default Path assumes default `root=Eliot`, `notes_subdir_template=YYYY` → `2026`.
+Before ANY `obsidian create` (except the intentional `overwrite` in §7a), probe the exact target: `obsidian read path="<target>"` (pre-approved, exact-path, one call). `obsidian create` silently auto-suffixes on collision (`X 1.md`) — treated as a bug; the guard prevents it.
+
+On hit (read succeeds → file exists), by target type:
+- **Project / plan** → never create. Ask once: "`<slug>` already exists — update it, view it, or pick a different name?"
+- **Note** → de-collide silently: append `-<HHmm>` to the slug, mention the adjusted name in the confirmation.
+- **Daily note** → it exists; skip creation and append (the normal path).
+
+On miss (read errors → file absent) → proceed with `obsidian create` as planned.
+
+---
+
+## §Lifecycle — Procedure Detail
+
+**Task done** (triggers in `SKILL.md §Lifecycle`):
+1. Locate the task line: read `<schedules_daily>/<today>.md`; not found → scan back up to 7 prior daily notes (1 read each); still not found → fallback `obsidian tasks todo` to name where it lives.
+2. Exactly one `- [ ]` match → rewrite that daily note flipping the line to `- [x]` via `obsidian create name="<file>" path="<schedules_daily>/<date>.md" content="<full-new-content>" overwrite` (daily notes are small; destructive → show the one-line diff + per-invocation approval). Record in last-write as `op:"task-done"` with the pre-write content.
+3. Multiple matches → ask which one. No match → "I can't find an open task matching `<x>` in the last 7 days."
+
+**Project archive** (triggers in `SKILL.md §Lifecycle`):
+1. Confirm: "Archive `<project>` — mark status done?"
+2. Three `property:set` calls (per-invocation approval, no file move, no whole-file rewrite):
+   - `obsidian property:set name="status" value="done" file="<projects>/<slug>.md"`
+   - `obsidian property:set name="tags" value='["project","status/done"]' file="<projects>/<slug>.md"`
+   - `obsidian property:set name="completed" value="<YYYY-MM-DD>" file="<projects>/<slug>.md"`
+3. Payoff: the project drops out of §Daily Review's `status/active` search automatically. Confirm: "Archived `<slug>` — it won't show in daily reviews."
+
+---
+
+## §Doctor — Check Catalog
+
+Full flow in `SKILL.md §/eliot doctor`. Scan is read-only; every fix requires per-invocation approval. Batch semantics reuse the §Tidy Strays batch-execution rule verbatim (per-item status `fixed` | `skipped-declined` | `skipped-missing` | `failed`, one retry max, never abort the batch over one item). The whole run records as ONE last-write entry: `{ ts, op:"doctor", batch_size, items:[{check, target, action, status}, ...] }`.
+
+| # | Check | Detection | Fix (on user pick) |
+|---|---|---|---|
+| 1 | Broken wikilinks | In Eliot-authored files (`up:`/`related:` frontmatter, schedule lines, project `## Notes`/`## Decisions` entries): extract `[[target]]`, probe `obsidian read path=`/`file=` for each unique target | Per missing-project policy (SKILL.md §Dual-Link step 3): create the target project (Project Template + §Create Guard) / convert link to plain text / leave as-is |
+| 2 | Duplicate files | Sibling `<name> 1.md` beside `<name>.md` (create auto-suffix pattern) in `<projects>`, `<plans>`, `<notes>` | Show both; user picks canonical; append the other's non-empty body under `## Merged from <dupe>` in the canonical file; trash dupe via `obsidian eval code="app.fileManager.trashFile(app.vault.getAbstractFileByPath('<path>'))"` (Obsidian trash — recoverable, never hard delete; §A1.4 sanitization applies) |
+| 3 | Placeholder residue | Literal `[What does done look like?]`, `area: "[[]]"`, empty REQUIRED sections (`## Goal` with no body), bare `- [ ] ` / `- ` stubs | Fill now (ask one question) or strip the placeholder/stub (file rewrite via `create ... overwrite`, diff preview first) |
+| 4 | Stale-active projects | `status/active` projects unmodified > 30 days (`obsidian search query="path:<projects> modified:30d"` inverted, or read `created`/mtime) | Offer the §Lifecycle project-archive flow per project |
+| 5 | Root artifacts | 0-byte `.md` files at vault root; empty vault-root folders with canonical names (`Projects/`, `Notes/`, …); non-md files inside Eliot folders | 0-byte/empty → offer trash via `trashFile`. Non-md artifacts (e.g. `.py`) → REPORT ONLY, Eliot never moves non-vault files. Eliot-frontmattered strays → "run `/eliot tidy`" (don't duplicate tidy logic) |
+| 6 | Profile.md schema | Content after the `## Vault Layout` YAML block (corruption — layout must be the final section, §11.4); missing canonical `vault_layout` keys; section order drift from §11.4 | Offer §7a repair: relocate stray content into its correct section, restore key/section order, add missing keys with defaults — one rewrite, diff preview first |
+
+Report format: numbered findings grouped by check, then "Fix which? (all / #s / none)". Zero writes before the user picks.
+
+---
+
+## §C.3 — Classification Test Table (acceptance: ≥ 19/21)
+
+Resolved Default Path assumes default `root=Eliot`, `notes_subdir_template=YYYY` → `2026`. Rows 6/7/9 pass the Rule 4 substance gate ("idea:" marker / "because" clause / "TIL" marker) and produce a **lean note** — frontmatter + `## The Idea` only, no empty optional sections.
 
 | # | Input | Rule | Expected Type | Expected Path | Resolved Default Path |
 |---|---|---|---|---|---|
@@ -186,10 +235,15 @@ Resolved Default Path assumes default `root=Eliot`, `notes_subdir_template=YYYY`
 | 16 | "decided to switch from Redux to Zustand in the store layer — hooks API is cleaner and bundle is 40% smaller. Risk: team needs to learn new patterns" | 2.5 | decision | `<notes>/<YYYY>/switch-from-redux-to-zustand.md` with Decision Note Template | `Eliot/Notes/2026/switch-from-redux-to-zustand.md` |
 | 17 | "decision: going with PostgreSQL over MongoDB for the home-office-renovation project — relational data fits better, easier to query across tables. Might need to revisit if write volume spikes" | 2.5 | decision + project link | `<notes>/<YYYY>/postgresql-over-mongodb.md` AND `<projects>/home-office-renovation.md` under `## Decisions` | `Eliot/Notes/2026/postgresql-over-mongodb.md` AND `Eliot/Projects/home-office-renovation.md` |
 | 18 | "add what we built to notes under home-office-renovation — refactored the budget calc into a shared util at utils/budget.ts, cleaner now but watch the rounding on fractional costs" | 2.6 | implementation + project link | `<notes>/<YYYY>/budget-calc-refactor.md` with `type: implementation` AND `<projects>/home-office-renovation.md` under `## Notes` | `Eliot/Notes/2026/budget-calc-refactor.md` AND `Eliot/Projects/home-office-renovation.md` |
+| 19 | "capture: I think mondays are the worst" | 4→6 (gate fail) | inbox | `<inbox>/<inbox_file>` — fails substance gate (no reason, no connection, < 25 words); confirm offers promotion | `Eliot/Inbox/Inbox.md` |
+| 20 | "done: buy groceries" | — (not a capture) | lifecycle: task done | flip `- [ ] buy groceries` → `- [x] buy groceries` in the daily note where it lives (§Lifecycle) | `Eliot/Schedules/Daily/<date>.md` |
+| 21 | "capture: sippos: fixed the login bug" (no `<projects>/sippos.md` exists) | 3 (unverified ref) | offer-to-create | ask "No project `sippos` yet — create `Eliot/Projects/sippos.md` and link, or capture without a link?" — NEVER silently write `[[sippos]]` | `Eliot/Projects/sippos.md` (only on consent) |
 
 ---
 
 ## §11.4 — Profile.md Section Schema (locked)
+
+`## Vault Layout` MUST remain the final section — any content after its YAML block is corruption (§Doctor check 6 repairs it). New facts are inserted into their section via the §7a rewrite, never appended to the file.
 
 ```markdown
 # Profile
@@ -258,7 +312,7 @@ Used for any FR-007 update or remove operation on Profile.md sections. Same proc
 5. On confirmation: `obsidian create name="Profile.md" path="<root>/Profile.md" content="<full-new-content>" overwrite` — destructive, NOT pre-approved. Two confirmation layers: Eliot's preview above + Claude Code tool approval.
 6. Record in last-write record as `{ op: "overwrite-profile", content: "<full pre-write content>" }` for undo.
 
-For append-style additions (new bullet under existing section): use `obsidian append path="<root>/Profile.md" content="\n- <bullet>"` — cheaper, no whole-file rewrite needed.
+**§7a is the ONLY write path for Profile.md — including new facts.** `obsidian append` writes to end-of-file only, and `## Vault Layout` is locked as the final section (§11.4), so an appended bullet always lands after the YAML block and corrupts the schema. Never `obsidian append` to Profile.md.
 
 ---
 
@@ -281,6 +335,20 @@ A bulk inbox triage occupies exactly ONE of the N=5 last-write slots:
 
 Undo for bulk-triage: "That was a triage of <N> items. Undo all of them, pick specific ones, or cancel?"
 
+**Dual-link entry shape** (one slot, referenced from `SKILL.md §Dual-Link Detection`):
+
+```
+{
+  ts: "<ISO-8601>",
+  op: "dual-link",
+  items: [
+    { file: "<notes>/<YYYY>/<slug>.md", op: "create" },
+    { file: "<projects>/<related_project>.md", op: "append", line: "- [[<note-slug>]] — <one-line summary>" }
+  ]
+}
+```
+Undo prompt: "Undo both the note and the project link, just one, or cancel?"
+
 ---
 
 ## §3.2 — Sentinel Write Procedure
@@ -292,7 +360,7 @@ Use Claude Code's `Write` tool with an absolute path. NOT shell redirection (`ec
 3. Write tool with that absolute path. Content (two lines terminated by newline):
    ```
    onboarded_at: <ISO-8601-timestamp>
-   skill_version: 0.6.0
+   skill_version: 0.7.0
    ```
 4. Claude Code's Write tool creates parent directories (`<home>/.eliot/`) automatically.
 5. On subsequent invocations, use the `Read` tool (not Bash) to check existence.
@@ -314,33 +382,28 @@ Both sentinels MUST be present to skip setup. Partial state is not silent contin
 
 ### Project Template
 
+Section policy: `## Goal` is **REQUIRED** — if the user didn't state a goal, ask one question ("What does done look like?") before creating; never emit placeholder text into the file. `## Next Action` and `## Tasks` are emitted only with real content — never blank `- ` or `- [ ] ` stubs (empty checkboxes pollute `obsidian tasks todo`). `## Decisions` and `## Notes` are NOT emitted at creation — the dual-link project-side append formats create them lazily on first use. Include the `area` frontmatter key only when the user names an area — never write `area: "[[]]"`. Include `due:` only when a due date was given.
+
 ```markdown
 ---
 created: <YYYY-MM-DD>
 type: project
 status: active
-area: "[[]]"
-due:
 tags: [project, status/active]
 ---
 
 # <Project Name>
 
 ## Goal
-[What does done look like?]
+<one-line goal — REQUIRED, from the user's answer>
 
 ## Next Action
-- 
-
-## Tasks
-- [ ] 
-
-## Decisions
-
-## Notes
+- <only when known>
 ```
 
 ### Plan Template
+
+Section policy: `## Goal` REQUIRED (ask one question if not given). `## Steps` emitted only with real steps — never a blank `- [ ] ` stub. `## Related Project` only when a project link exists (also drop the `project:` frontmatter key otherwise). `## Notes` NOT emitted at creation (created lazily on first append).
 
 ```markdown
 ---
@@ -355,18 +418,18 @@ tags: [plan]
 # <Plan Title>
 
 ## Goal
-<one-line goal>
+<one-line goal — REQUIRED>
 
 ## Steps
-- [ ] 
+- [ ] <only real steps>
 
 ## Related Project
 [[<project-slug>]]
-
-## Notes
 ```
 
 ### Daily Note Stub Template (minimal, created when daily note is missing)
+
+Deliberately minimal — appends land under the H1; §Daily Review extracts `- [ ]` lines position-independently; `/eliot wrap` appends its own section. Never create a daily note as a bare line without this stub.
 
 ```markdown
 ---
@@ -376,21 +439,13 @@ tags: [daily]
 ---
 
 # <YYYY-MM-DD>
-
-## Morning Intentions
-- [ ] 
-
-## Tasks
-- [ ] 
-
-## Notes
-
-## Evening Reflection
 ```
 
 ### Meeting Note Template
 
 Used when content begins with "meeting with", "call with", "sync with", "standup", "1:1", or similar.
+
+Section policy: `## Attendees` and `## Notes` are **REQUIRED**. `## Agenda`, `## Decisions`, `## Action Items` are **OPTIONAL** — emit only when the user gave that information; never emit a blank `- [ ] ` action-item stub.
 
 ```markdown
 ---
@@ -406,21 +461,26 @@ tags: [meeting]
 # <Meeting Title>
 
 ## Attendees
-- 
-
-## Agenda
+- <name>
 
 ## Notes
+<what the user said about the meeting>
+
+## Agenda
+<OPTIONAL>
 
 ## Decisions
+<OPTIONAL>
 
 ## Action Items
-- [ ] 
+<OPTIONAL — only real items, e.g. "- [ ] send recap">
 ```
 
 ### Note Template
 
 Used when §Dual-Link Detection finds no matching project.
+
+Section policy: `## The Idea` is **REQUIRED** (always emitted, holds the user's content verbatim). `## Why It Matters` and `## Connections` are **OPTIONAL** — emit them only when the user gave reasons or connections; never emit an empty heading or the bare `- Supports: / - Challenges:` skeleton. Frontmatter keys are schema — always present (`says` mandatory-filled per §Dual-Link step 3.5).
 
 ```markdown
 ---
@@ -441,15 +501,15 @@ says: ""
 <content>
 
 ## Why It Matters
+<OPTIONAL — only when reasons were given>
 
 ## Connections
-- Supports: 
-- Challenges: 
+<OPTIONAL — only with real links, e.g. "- Supports: [[note]]">
 ```
 
 ### Note Template (with project link)
 
-Used when §Dual-Link Detection sets `related_project`. Includes `up` pointing to the project and a `## Related Project` section.
+Used when §Dual-Link Detection sets `related_project`. Includes `up` pointing to the project and a `## Related Project` section. Same section policy as the Note Template: `## The Idea` and `## Related Project` REQUIRED; `## Why It Matters` / `## Connections` OPTIONAL (omit when empty).
 
 ```markdown
 ---
@@ -469,12 +529,6 @@ says: ""
 ## The Idea
 
 <content>
-
-## Why It Matters
-
-## Connections
-- Supports: 
-- Challenges: 
 
 ## Related Project
 [[<project-slug>]]
@@ -482,7 +536,9 @@ says: ""
 
 ### Decision Note Template
 
-Used when Rule 2.5 fires (content contains decision trigger keywords). Eliot fills sections from the user's message — does NOT ask for missing sections, leaves them blank.
+Used when Rule 2.5 fires (content contains decision trigger keywords). Eliot fills sections from the user's message — does NOT ask for missing sections.
+
+Section policy: `## Context`, `## Decision`, `## Why` are **REQUIRED** (always emitted — extract from the user's message; if genuinely absent, the heading stays with no body). `## Where`, `## Trade-offs`, `## Future Considerations` are **OPTIONAL** — emit only when the user's message contains that information; omit the heading otherwise. The angle-bracket lines below are extraction guidance, never written to the file.
 
 ```markdown
 ---
@@ -504,22 +560,22 @@ says: ""
 ## Decision
 <What was decided — one clear statement.>
 
-## Where
-<Which files, components, or areas are affected?>
-
 ## Why
 <The rationale — what made this the right call?>
 
+## Where
+<OPTIONAL — which files, components, or areas are affected?>
+
 ## Trade-offs
-<What do we give up or risk with this approach?>
+<OPTIONAL — what do we give up or risk with this approach?>
 
 ## Future Considerations
-<What might need revisiting later? What should a future reader watch out for?>
+<OPTIONAL — what might need revisiting later?>
 ```
 
 ### Decision Note Template (with project link)
 
-Used when §Dual-Link Detection (decision mode) sets `related_project`.
+Used when §Dual-Link Detection (decision mode) sets `related_project`. Same section policy as the Decision Note Template; `## Related Project` is REQUIRED.
 
 ```markdown
 ---
@@ -542,17 +598,17 @@ says: ""
 ## Decision
 <What was decided — one clear statement.>
 
-## Where
-<Which files, components, or areas are affected?>
-
 ## Why
 <The rationale — what made this the right call?>
 
+## Where
+<OPTIONAL>
+
 ## Trade-offs
-<What do we give up or risk with this approach?>
+<OPTIONAL>
 
 ## Future Considerations
-<What might need revisiting later? What should a future reader watch out for?>
+<OPTIONAL>
 
 ## Related Project
 [[<project-slug>]]
@@ -560,7 +616,9 @@ says: ""
 
 ### Implementation Note Template
 
-Used when Rule 2.6 fires (content contains implementation trigger phrases). Eliot fills sections from the user's message — does NOT ask for missing sections, leaves them blank.
+Used when Rule 2.6 fires (content contains implementation trigger phrases). Eliot fills sections from the user's message — does NOT ask for missing sections.
+
+Section policy: `## What Was Built` and `## Where` are **REQUIRED**. `## Why`, `## What's Good`, `## Watch Out For`, `## Next Steps` are **OPTIONAL** — emit only when the user's message contains that information; omit the heading otherwise. Angle-bracket lines are extraction guidance, never written to the file.
 
 ```markdown
 ---
@@ -582,21 +640,21 @@ says: ""
 <Files, components, or areas affected.>
 
 ## Why
-<The motivation — what problem does this solve?>
+<OPTIONAL — the motivation.>
 
 ## What's Good
-<Benefits: why this is the right shape, what works well.>
+<OPTIONAL — benefits, what works well.>
 
 ## Watch Out For
-<Risks, gotchas, edge cases a future reader should know.>
+<OPTIONAL — risks, gotchas, edge cases.>
 
 ## Next Steps
-<Follow-ups or things left to do, if any.>
+<OPTIONAL — follow-ups left to do.>
 ```
 
 ### Implementation Note Template (with project link)
 
-Used when §Dual-Link Detection (implementation mode) sets `related_project`.
+Used when §Dual-Link Detection (implementation mode) sets `related_project`. Same section policy as the Implementation Note Template; `## Related Project` is REQUIRED.
 
 ```markdown
 ---
@@ -619,16 +677,16 @@ says: ""
 <Files, components, or areas affected.>
 
 ## Why
-<The motivation — what problem does this solve?>
+<OPTIONAL>
 
 ## What's Good
-<Benefits: why this is the right shape, what works well.>
+<OPTIONAL>
 
 ## Watch Out For
-<Risks, gotchas, edge cases a future reader should know.>
+<OPTIONAL>
 
 ## Next Steps
-<Follow-ups or things left to do, if any.>
+<OPTIONAL>
 
 ## Related Project
 [[<project-slug>]]
@@ -761,3 +819,5 @@ The path is computed at runtime from environment variables. It is never hard-cod
 - Multi-vault support (FR-030) is P2. v1 always uses the active vault.
 - `obsidian search:context` is not in the verified CLI surface and is not pre-approved.
 - `/eliot brief` and `/eliot wrap` are P2 features.
+- §Doctor never auto-merges duplicate content beyond the `## Merged from <dupe>` append; deeper merges are the user's call.
+- Non-md artifacts inside Eliot folders (scripts, images misfiled by other tools) are report-only — Eliot never moves non-vault files.

@@ -37,6 +37,12 @@
           "name": "self-names-as-eliot",
           "description": "Response contains the word 'Eliot' (self-identification, Metric 5a)",
           "check": "response.txt contains 'Eliot' (case-sensitive)"
+        },
+        {
+          "id": "1f",
+          "name": "wikilink-only-when-project-verified",
+          "description": "The [[wikilink]] is written only after the project is confirmed to exist (obsidian search/read hit in Projects/). If no matching project file exists, Eliot must offer to create it or capture without a link — never silently write a dangling wikilink",
+          "check": "trace.txt shows a Projects/-scoped search or read for the project BEFORE the write; if no match was found, response.txt contains an offer to create the project instead of a silent [[...]] write"
         }
       ]
     },
@@ -113,8 +119,14 @@
         {
           "id": "3e",
           "name": "no-unnecessary-clarification",
-          "description": "Does not ask clarifying questions (input is unambiguous for Rule 4)",
+          "description": "Does not ask clarifying questions (input is unambiguous for Rule 4 — has a 'because' clause, passes the substance gate)",
           "check": "response.txt does not contain a question mark as a clarification request"
+        },
+        {
+          "id": "3f",
+          "name": "lean-note-no-empty-sections",
+          "description": "Created note omits empty optional sections: no empty '## Why It Matters' heading, no '## Connections' with the bare '- Supports: / - Challenges:' skeleton (§Template Enforcement section policy)",
+          "check": "the created note content in trace.txt does NOT contain '- Supports: ' with empty value and does NOT contain a '## Why It Matters' heading with no body; frontmatter has 'type: permanent' and a 12-digit 'id'"
         }
       ]
     },
@@ -142,6 +154,228 @@
           "name": "confirmation-shows-full-path",
           "description": "Confirmation names the full Eliot/-prefixed path (voice rule from examples/dialogues.md Notes on Voice)",
           "check": "response.txt contains 'Eliot/Schedules/Daily/' in the confirmation line"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "fleeting-gate",
+      "prompt": "capture: I think mondays are the worst",
+      "expected_output": "Rule 4 substance gate FAILS (no reason/mechanism, no connection, < 25 words, no TIL/idea: marker) → routes to inbox: appends `- [YYYY-MM-DD HH:MM] I think mondays are the worst` to `Eliot/Inbox/Inbox.md` (folder created lazily with consent if missing). Confirmation offers promotion: \"say 'make it a note' to promote\". Does NOT create a file under Eliot/Notes/.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "5a",
+          "name": "routed-to-inbox-not-notes",
+          "description": "Target is Eliot/Inbox/Inbox.md, not a new file under Eliot/Notes/",
+          "check": "trace.txt or response.txt shows a write to 'Eliot/Inbox/Inbox.md'; FAILS if a file under 'Eliot/Notes/' was created"
+        },
+        {
+          "id": "5b",
+          "name": "offers-promotion",
+          "description": "Confirmation offers promoting the parked item to a note",
+          "check": "response.txt contains 'make it a note' or an equivalent promotion offer"
+        },
+        {
+          "id": "5c",
+          "name": "no-empty-scaffold-note",
+          "description": "No permanent note with empty '## Why It Matters'/'## Connections' scaffolding is created for the one-liner",
+          "check": "trace.txt does not show creation of a note containing empty '## Connections' or '- Supports:' skeleton"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "duplicate-project-guard",
+      "prompt": "eliot, start a project called psmux",
+      "expected_output": "Create Guard fires: probes `obsidian read path=\"Eliot/Projects/psmux.md\"` BEFORE any create. File exists (fixture) → Eliot never calls `obsidian create` (which would auto-suffix `psmux 1.md`); asks once: \"psmux already exists — update it, view it, or pick a different name?\"",
+      "files": ["Eliot/Projects/psmux.md"],
+      "assertions": [
+        {
+          "id": "6a",
+          "name": "probes-before-create",
+          "description": "An obsidian read of Eliot/Projects/psmux.md happens before any create call",
+          "check": "trace.txt shows 'read' with 'Eliot/Projects/psmux.md' before any 'create' call"
+        },
+        {
+          "id": "6b",
+          "name": "no-auto-suffix-duplicate",
+          "description": "No 'psmux 1.md' (or any suffixed duplicate) is created",
+          "check": "trace.txt does not contain 'psmux 1' and no obsidian create targeting Projects/ runs"
+        },
+        {
+          "id": "6c",
+          "name": "asks-update-view-rename",
+          "description": "Eliot asks whether to update, view, or pick a different name",
+          "check": "response.txt contains 'already exists' and offers at least two of: update / view / different name"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "missing-project-link",
+      "prompt": "capture: sippos: fixed the login redirect bug in the auth callback",
+      "expected_output": "User explicitly names project 'sippos' but no Eliot/Projects/sippos.md exists. Eliot searches Projects/, finds no match, and asks once: \"No project `sippos` yet — create `Eliot/Projects/sippos.md` and link, or capture without a link?\" NEVER silently writes a dangling [[sippos]] wikilink (§Dual-Link invariant: an unverified project reference never becomes a wikilink).",
+      "files": [],
+      "assertions": [
+        {
+          "id": "7a",
+          "name": "searches-projects-first",
+          "description": "Searches/reads Projects/ for 'sippos' before any write",
+          "check": "trace.txt shows an obsidian search or read scoped to Projects/ with 'sippos' before any create/append"
+        },
+        {
+          "id": "7b",
+          "name": "offers-create-or-unlinked",
+          "description": "Asks whether to create the project or capture without a link",
+          "check": "response.txt contains an offer to create Eliot/Projects/sippos.md or capture without a link"
+        },
+        {
+          "id": "7c",
+          "name": "no-silent-dangling-wikilink",
+          "description": "Does not write [[sippos]] into any file before the user answers",
+          "check": "trace.txt shows no write containing '[[sippos]]' before the user's choice"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "profile-rewrite-only",
+      "prompt": "eliot, remember: I prefer 25-minute pomodoros for deep work",
+      "expected_output": "New Profile.md fact goes through the §7a whole-file rewrite — read Profile.md, insert the bullet under ## Preferences (## Vault Layout stays the final section), show ≤12-line diff preview, then `obsidian create ... overwrite` on confirmation. NEVER `obsidian append` to Profile.md (EOF-only append corrupts the schema).",
+      "files": ["Eliot/Profile.md"],
+      "assertions": [
+        {
+          "id": "8a",
+          "name": "no-append-to-profile",
+          "description": "No obsidian append call targets Profile.md",
+          "check": "trace.txt does not contain an 'append' call with 'Profile.md'"
+        },
+        {
+          "id": "8b",
+          "name": "diff-preview-shown",
+          "description": "A diff preview of the change is shown before the overwrite",
+          "check": "response.txt contains a preview with '+' marked line(s) and asks to apply before any overwrite runs"
+        },
+        {
+          "id": "8c",
+          "name": "fact-in-correct-section",
+          "description": "The new bullet is inserted under ## Preferences, not after the ## Vault Layout block",
+          "check": "the proposed content in trace.txt/response.txt places the pomodoro bullet inside ## Preferences and keeps ## Vault Layout as the final section"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "task-done",
+      "prompt": "eliot, done: buy groceries",
+      "expected_output": "§Lifecycle task-done flow: reads today's daily note (fixture has `- [ ] buy groceries`), finds exactly one match, shows the one-line diff, and flips the line to `- [x] buy groceries` via a daily-note rewrite (create ... overwrite, approval). Other lines untouched. Records op:\"task-done\" in last-write.",
+      "files": ["Eliot/Schedules/Daily/<today>.md"],
+      "assertions": [
+        {
+          "id": "9a",
+          "name": "reads-daily-note-first",
+          "description": "Reads the daily note before writing",
+          "check": "trace.txt shows 'read' with 'Eliot/Schedules/Daily/' before any write"
+        },
+        {
+          "id": "9b",
+          "name": "flips-checkbox",
+          "description": "The task line becomes '- [x] buy groceries'",
+          "check": "trace.txt or response.txt shows '- [x] buy groceries' in the written content"
+        },
+        {
+          "id": "9c",
+          "name": "rest-of-note-preserved",
+          "description": "Only the matched line changes; frontmatter and other lines are preserved verbatim",
+          "check": "the rewritten content in trace.txt preserves all non-matched lines from the fixture"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "archive-project",
+      "prompt": "eliot, archive psmux",
+      "expected_output": "§Lifecycle project-archive flow: confirms, then three `obsidian property:set` calls on Eliot/Projects/psmux.md — status=done, tags=[\"project\",\"status/done\"], completed=<today>. No file move, no whole-file rewrite. Confirms the project drops out of daily reviews.",
+      "files": ["Eliot/Projects/psmux.md"],
+      "assertions": [
+        {
+          "id": "10a",
+          "name": "uses-property-set",
+          "description": "Archive is done via obsidian property:set calls, not create/overwrite or a file move",
+          "check": "trace.txt shows property:set with 'status' and 'done' targeting psmux.md; no renameFile/create overwrite for this flow"
+        },
+        {
+          "id": "10b",
+          "name": "tags-flipped-to-done",
+          "description": "tags become [\"project\",\"status/done\"] (so the status/active daily-review search no longer matches)",
+          "check": "trace.txt shows property:set with 'status/done' in the tags value"
+        },
+        {
+          "id": "10c",
+          "name": "confirms-before-archiving",
+          "description": "Asks for confirmation before the property writes",
+          "check": "response.txt contains a confirmation question mentioning 'archive' before the property:set calls run"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "daily-stub-minimal",
+      "prompt": "capture: call the plumber tomorrow at 10",
+      "expected_output": "Tomorrow's daily note doesn't exist → daily-note gate fires: creates the minimal stub (frontmatter date/type/tags + `# <YYYY-MM-DD>` H1 ONLY — no Morning Intentions/Evening Reflection sections, no blank checkboxes), then appends `- [ ] 10:00 Call the plumber`.",
+      "files": [],
+      "assertions": [
+        {
+          "id": "11a",
+          "name": "stub-created-before-append",
+          "description": "A create for the missing daily note happens before the append",
+          "check": "trace.txt shows obsidian create for 'Eliot/Schedules/Daily/<tomorrow>.md' before the append call"
+        },
+        {
+          "id": "11b",
+          "name": "stub-is-minimal",
+          "description": "Stub contains only frontmatter (date/type/tags) and the H1 date — no section headings, no blank '- [ ] ' stubs",
+          "check": "the created stub content in trace.txt has frontmatter + '# ' H1 and does NOT contain 'Morning Intentions', 'Evening Reflection', or a blank '- [ ] ' line"
+        },
+        {
+          "id": "11c",
+          "name": "never-bare-line-file",
+          "description": "The daily note is never created as a bare checkbox line without frontmatter/H1",
+          "check": "trace.txt does not show a created daily note whose full content is just a '- [ ]' line"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "doctor-report",
+      "prompt": "/eliot doctor",
+      "expected_output": "Read-only scan runs first: finds (fixture) the literal placeholder '[What does done look like?]' in a project file and a dangling `up: [[ghost]]` wikilink in a note. Reports both as numbered findings grouped by check, then asks 'Fix which? (all / #s / none)'. ZERO writes before the user picks.",
+      "files": ["Eliot/Projects/broken.md", "Eliot/Notes/2026/dangling.md"],
+      "assertions": [
+        {
+          "id": "12a",
+          "name": "finds-placeholder-residue",
+          "description": "Report lists the '[What does done look like?]' placeholder finding",
+          "check": "response.txt mentions the placeholder text or names the project file under a placeholder-residue finding"
+        },
+        {
+          "id": "12b",
+          "name": "finds-broken-wikilink",
+          "description": "Report lists the dangling [[ghost]] wikilink finding",
+          "check": "response.txt mentions 'ghost' or the dangling-link file under a broken-wikilink finding"
+        },
+        {
+          "id": "12c",
+          "name": "zero-writes-before-pick",
+          "description": "No create/append/property:set/eval write runs before the user picks fixes",
+          "check": "trace.txt shows only read/search calls before the 'Fix which?' question in response.txt"
+        },
+        {
+          "id": "12d",
+          "name": "numbered-findings-with-pick-prompt",
+          "description": "Findings are numbered and the report ends asking which to fix",
+          "check": "response.txt contains a numbered list and a 'Fix which' (all / #s / none) style question"
         }
       ]
     }
