@@ -82,9 +82,13 @@ vault_layout:
 **§A1.4 — vault_layout Value Sanitization (eval-injection guard):**
 
 Before interpolating any `vault_layout` value (including `root`) into an `obsidian eval code=` string:
-1. Validate the value matches the pattern `^[A-Za-z0-9 _./\-]+$`.
-2. If the value contains any character outside that set (quotes, backslashes, semicolons, pipes, backticks, newlines, or other JS metacharacters): **do not interpolate**. Instead, fall back to the canonical default for that key and warn the user: "Your vault path for `<key>` contains characters that can't be used in a folder check. Using the default `<canonical-default>` instead — you can correct this in Profile.md."
-3. This rule applies to every path value interpolated into `obsidian eval code=` strings anywhere in Eliot's instructions.
+1. Denylist check: reject the value iff it contains any of `'`, `"`, `\`, `` ` ``, `$`, `;`, or any control character (U+0000–U+001F, U+007F). All other characters — including CJK and any other Unicode script — pass; this guard does not restrict folder names to ASCII, and non-ASCII `vault_layout` values (e.g. `root: "筆記"`) are fully supported.
+2. On rejection, **do not interpolate** that value into any eval string. The configured path itself remains authoritative for every non-eval CLI operation (`create`, `append`, `read`, `search path=`, `property:set`, `template:insert`) — never redirect a read or write to a default folder. Only the eval-based operation degrades:
+   - Folder-existence checks fall back to the non-eval `obsidian read` probe for that folder (the same fallback already named in `SKILL.md §/eliot status` step 3).
+   - Per-item eval operations (`renameFile`, `trashFile`) mark that item's status `failed` and continue the rest of the batch — the standard `SKILL.md §Tidy Strays` batch-execution rule.
+   - Warn once per session: "Your vault path for `<key>` contains a character (`<char>`) that can't be used in an eval-based check or move. The path itself is still used for reads and writes — only that check/move is skipped. Correct it in Profile.md?" (offers the [§7a](#7a--profilemd-vault_layout-rewrite-procedure) correction flow).
+3. Single-quote convention: every eval call site MUST wrap an interpolated path as a single-quoted JS string literal (e.g. `'<path>'`) — never double-quoted or unquoted. The denylist in rule 1 prevents injection only under this convention.
+4. This rule applies to every path value interpolated into `obsidian eval code=` strings anywhere in Eliot's instructions.
 
 ---
 
@@ -110,9 +114,9 @@ Full flow lives in `SKILL.md §Tidy Strays`. This section documents the detectio
 
 Files without this frontmatter shape are left alone — they may be hand-authored and outside Eliot's remit. The user confirms the final move list regardless.
 
-**Move mechanism:** the verified CLI has no dedicated move/rename subcommand (§CLI Verification). Use `obsidian eval code="app.fileManager.renameFile(<TFile>, '<new-path>')"` — this Obsidian API updates all wikilinks pointing to the moved file automatically. Resolve the `<TFile>` argument via `app.vault.getAbstractFileByPath('<stray-path>')` inside the same eval call. Sanitize every interpolated path (`<stray-path>` and `<new-path>`) per [§A1.4](#a14--vault_layout-value-sanitization-eval-injection-guard) before building the eval string — the same injection rule that governs folder-check evals applies here. §A1.4's "fall back to the canonical default" remediation does not apply here — a discovered stray path has no `vault_layout` key or default to fall back to. If a `<stray-path>` or `<new-path>` fails the §A1.4 character-set check, record that item's status as `failed`, skip it, and continue with the rest of the batch.
+**Move mechanism:** the verified CLI has no dedicated move/rename subcommand (§CLI Verification). Use `obsidian eval code="app.fileManager.renameFile(<TFile>, '<new-path>')"` — this Obsidian API updates all wikilinks pointing to the moved file automatically. Resolve the `<TFile>` argument via `app.vault.getAbstractFileByPath('<stray-path>')` inside the same eval call. Sanitize every interpolated path (`<stray-path>` and `<new-path>`) per [§A1.4](#a14--vault_layout-value-sanitization-eval-injection-guard) before building the eval string — the same injection rule that governs folder-check evals applies here, including the single-quote convention. If a `<stray-path>` or `<new-path>` fails the §A1.4 denylist check, record that item's status as `failed`, skip it, and continue with the rest of the batch.
 
-**Batch-execution rule (per-item status):** moves happen one item at a time; the batch never aborts because one item can't be moved. Each item ends in exactly one status — `moved`, `skipped-declined` (per-invocation approval for that item's `obsidian eval` was declined), `skipped-missing` (`app.vault.getAbstractFileByPath('<stray-path>')` returns null when the move is attempted — the file vanished between proposal and execution), or `failed` (the eval call errored after one retry, or the path failed the §A1.4 sanitization check). An item is retried at most once on error before being marked `failed`. These statuses feed the `SKILL.md §Tidy Strays` last-write entry (`items:[{from, to, status}, ...]`, mirroring the `bulk-triage` entry shape in [§3.3](#33--last-write-record-bulk-triage-entry-shape)) — the post-batch confirmation reports moved/skipped/failed counts, and the undo prompt offers only items with `status: moved`.
+**Batch-execution rule (per-item status):** moves happen one item at a time; the batch never aborts because one item can't be moved. Each item ends in exactly one status — `moved`, `skipped-declined` (per-invocation approval for that item's `obsidian eval` was declined), `skipped-missing` (`app.vault.getAbstractFileByPath('<stray-path>')` returns null when the move is attempted — the file vanished between proposal and execution), or `failed` (the eval call errored after one retry, or the path failed the §A1.4 sanitization check). An item is retried at most once on error before being marked `failed`. These statuses feed the `SKILL.md §Tidy Strays` last-write entry (`items:[{from, to, status}, ...]`, mirroring the `bulk-triage` entry shape in [§3.3](#33--last-write-journal-file-format-and-entry-shapes)) — the post-batch confirmation reports moved/skipped/failed counts, and the undo prompt offers only items with `status: moved`.
 
 **Degraded mode:** if `obsidian eval` errors (app not running, eval disabled) or `app.fileManager` is unavailable before any move is attempted, do not attempt a raw filesystem move — Eliot never touches the filesystem directly (§Error Handling and Security). Print the confirmed move list as manual instructions instead. If `obsidian eval` becomes unavailable partway through a batch, mark every not-yet-attempted item `failed` rather than retrying or aborting the items already resolved, then proceed to recording the batch.
 
@@ -181,7 +185,7 @@ On miss (read errors → file absent) → proceed with `obsidian create` as plan
 
 **Task done** (triggers in `SKILL.md §Lifecycle`):
 1. Locate the task line: read `<schedules_daily>/<today>.md`; not found → scan back up to 7 prior daily notes (1 read each); still not found → fallback `obsidian tasks todo` to name where it lives.
-2. Exactly one `- [ ]` match → rewrite that daily note flipping the line to `- [x]` via `obsidian create name="<file>" path="<schedules_daily>/<date>.md" content="<full-new-content>" overwrite` (daily notes are small; destructive → show the one-line diff + per-invocation approval). Record in last-write as `op:"task-done"` with the pre-write content.
+2. Exactly one `- [ ]` match → rewrite that daily note flipping the line to `- [x]` via `obsidian create name="<file>" path="<schedules_daily>/<date>.md" content="<full-new-content>" overwrite` (daily notes are small; destructive → show the one-line diff + per-invocation approval). Record to the persisted journal (SKILL.md §Last-Write Record) as { ts, vault, file, op:"task-done", content:"<pre-write content>" } — the pre-write content is the daily note read in step 1 of this same flow, never reconstructed.
 3. Multiple matches → ask which one. No match → "I can't find an open task matching `<x>` in the last 7 days."
 
 **Project archive** (triggers in `SKILL.md §Lifecycle`):
@@ -196,7 +200,7 @@ On miss (read errors → file absent) → proceed with `obsidian create` as plan
 
 ## §Doctor — Check Catalog
 
-Full flow in `SKILL.md §/eliot doctor`. Scan is read-only; every fix requires per-invocation approval. Batch semantics reuse the §Tidy Strays batch-execution rule verbatim (per-item status `fixed` | `skipped-declined` | `skipped-missing` | `failed`, one retry max, never abort the batch over one item). The whole run records as ONE last-write entry: `{ ts, op:"doctor", batch_size, items:[{check, target, action, status}, ...] }`.
+Full flow in `SKILL.md §/eliot doctor`. Scan is read-only; every fix requires per-invocation approval. Batch semantics reuse the §Tidy Strays batch-execution rule verbatim (per-item status `fixed` | `skipped-declined` | `skipped-missing` | `failed`, one retry max, never abort the batch over one item). The whole run records as ONE journal entry (§Last-Write Record): { ts, vault, op:"doctor", batch_size, items:[{check, target, action, status}, ...] }.
 
 | # | Check | Detection | Fix (on user pick) |
 |---|---|---|---|
@@ -310,19 +314,20 @@ Used for any FR-007 update or remove operation on Profile.md sections. Same proc
    Apply? (yes / no / show full file)
    ```
 5. On confirmation: `obsidian create name="Profile.md" path="<root>/Profile.md" content="<full-new-content>" overwrite` — destructive, NOT pre-approved. Two confirmation layers: Eliot's preview above + Claude Code tool approval.
-6. Record in last-write record as `{ op: "overwrite-profile", content: "<full pre-write content>" }` for undo.
+6. Record to the persisted journal at `<home>/.eliot/last-writes.json` (`SKILL.md §Last-Write Record`) as `{ ts, vault, op: "overwrite-profile", content: "<full pre-write content>" }` for undo — the pre-write content is exactly the content read from disk in step 1 of this same flow, never reconstructed.
 
 **§7a is the ONLY write path for Profile.md — including new facts.** `obsidian append` writes to end-of-file only, and `## Vault Layout` is locked as the final section (§11.4), so an appended bullet always lands after the YAML block and corrupts the schema. Never `obsidian append` to Profile.md.
 
 ---
 
-## §3.3 — Last-Write Record: Bulk-Triage Entry Shape
+## §3.3 — Last-Write Journal: File Format and Entry Shapes
 
-A bulk inbox triage occupies exactly ONE of the N=5 last-write slots:
+The journal is a single JSON array persisted at `<home>/.eliot/last-writes.json` (full write procedure, guard, and ring semantics in `SKILL.md §Last-Write Record`). Every entry shape below carries a `vault` key (absolute vault path) so the undo ring can be filtered to the current vault; `ts` is ISO-8601. A bulk inbox triage occupies exactly ONE journal entry:
 
 ```
 {
   ts: "<ISO-8601>",
+  vault: "<absolute-vault-path>",
   op: "bulk-triage",
   batch_size: <N>,
   items: [
@@ -335,11 +340,12 @@ A bulk inbox triage occupies exactly ONE of the N=5 last-write slots:
 
 Undo for bulk-triage: "That was a triage of <N> items. Undo all of them, pick specific ones, or cancel?"
 
-**Dual-link entry shape** (one slot, referenced from `SKILL.md §Dual-Link Detection`):
+**Dual-link entry shape** (one entry, referenced from `SKILL.md §Dual-Link Detection`):
 
 ```
 {
   ts: "<ISO-8601>",
+  vault: "<absolute-vault-path>",
   op: "dual-link",
   items: [
     { file: "<notes>/<YYYY>/<slug>.md", op: "create" },
@@ -360,7 +366,7 @@ Use Claude Code's `Write` tool with an absolute path. NOT shell redirection (`ec
 3. Write tool with that absolute path. Content (two lines terminated by newline):
    ```
    onboarded_at: <ISO-8601-timestamp>
-   skill_version: 0.7.0
+   skill_version: 0.8.0
    ```
 4. Claude Code's Write tool creates parent directories (`<home>/.eliot/`) automatically.
 5. On subsequent invocations, use the `Read` tool (not Bash) to check existence.
@@ -791,8 +797,8 @@ Default hierarchy (all under `<root>/`, default `Eliot/`):
 
 ## Undo
 
-Within the same Claude Code session: "undo that" or "undo the last capture".
-Cross-session undo: use Obsidian Sync history or git.
+"undo that" or "undo the last capture" works across sessions on this machine via Eliot's write journal (`~/.eliot/last-writes.json`).
+Cross-machine, or beyond the last writes: use Obsidian File Recovery, Sync history, or git.
 
 ## Profile
 
@@ -815,9 +821,10 @@ The path is computed at runtime from environment variables. It is never hard-cod
 
 ## §Known Limits
 
-- Last-write record is per-session only (lost on session end). Future enhancement: persist to `Eliot/.last-writes.log`.
+- Last-write record persists across sessions in `<home>/.eliot/last-writes.json` (25-entry cap, per-vault N=5 undo ring). `/eliot doctor` journal-health checks and `/eliot status` journal reporting are not yet implemented — future enhancements.
 - Multi-vault support (FR-030) is P2. v1 always uses the active vault.
 - `obsidian search:context` is not in the verified CLI surface and is not pre-approved.
 - `/eliot brief` and `/eliot wrap` are P2 features.
 - §Doctor never auto-merges duplicate content beyond the `## Merged from <dupe>` append; deeper merges are the user's call.
 - Non-md artifacts inside Eliot folders (scripts, images misfiled by other tools) are report-only — Eliot never moves non-vault files.
+- `vault_layout` values may use any Unicode script (CJK included) — the §A1.4 guard is a denylist, not an ASCII allowlist. The residual limit: a value containing a denylisted character (`'` `"` `\` `` ` `` `$` `;`, or a control character) cannot be used in eval-based operations — folder-existence checks degrade to the read-probe fallback and per-item moves/fixes mark that item `failed` — until corrected via [§7a](#7a--profilemd-vault_layout-rewrite-procedure). Reads and writes to the configured path are unaffected.

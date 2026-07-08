@@ -1,6 +1,6 @@
 ---
 name: eliot
-version: "0.7.0"
+version: "0.8.0"
 description: |
   Eliot — your personal Obsidian assistant. Use when the user says capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, done: <X>, mark <X> done, archive <project>, or starts a turn with "eliot ...". Activates /eliot, /eliot status, /eliot help, /eliot brief, /eliot wrap, /eliot tidy, /eliot doctor. Manages an Obsidian vault via the local obsidian CLI: captures notes into a single Obsidian folder (default `Eliot/`) holding Inbox, Notes, Projects, Plans, Schedules, and the Profile — nothing is scattered at the vault root. Maintains projects and plans, reviews the daily and weekly schedule, and remembers user routines and preferences in Eliot/Profile.md across sessions. Refers to itself as "Eliot". Does NOT activate for coding-context "capture" (e.g., stdout capture, screenshot capture, log capture, build-output capture); confirms intent on ambiguous triggers. Does NOT activate on "remind me" — reminders are out of scope.
 user-invocable: true
@@ -89,7 +89,7 @@ After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1
 Use Claude Code `Write` tool (NOT shell redirection). Detect home: Windows = `$env:USERPROFILE`, macOS/Linux = `$HOME`. Write to `<home>/.eliot/onboarded`:
 ```
 onboarded_at: <ISO-8601>
-skill_version: 0.7.0
+skill_version: 0.8.0
 ```
 
 **Step 5 — Execute the user's task:**
@@ -148,24 +148,36 @@ Never construct a write target from "today's daily note", "the plugin's daily fo
 
 ## §Last-Write Record (FR-015)
 
-Per-session ring buffer, N=5, not persisted. Single-write entry: `{ ts, file, op, content }`. Bulk-triage entry (one slot): `{ ts, op:"bulk-triage", batch_size, items:[...] }`. Dual-link entry (one slot): `{ ts, op:"dual-link", items:[...] }` — see §Dual-Link Detection. Tidy-strays entry (one slot): `{ ts, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }` — see §Tidy Strays. Doctor entry (one slot): `{ ts, op:"doctor", batch_size, items:[{check, target, action, status}, ...] }` — see §/eliot doctor. Task-done entry: `{ ts, file, op:"task-done", content:"<pre-write content>" }`. Evict oldest on overflow. Lost on session end (documented v1 limit).
+**Journal file:** `<home>/.eliot/last-writes.json` (home detection identical to §First-Invocation Check step 1; Windows: `<USERPROFILE>\.eliot\last-writes.json`). A JSON array of entries, newest last. Written with Claude Code `Read`+`Write` tools only — never shell redirection (same rule as [`reference.md §3.2`](./reference.md#32--sentinel-write-procedure) sentinel write). The file and `.eliot/` directory are created lazily on first write.
+
+**Entry shapes** (every shape below carries a `vault` key — absolute vault path): Single-write entry: `{ ts, vault, file, op, content }`. Bulk-triage entry (one entry): `{ ts, vault, op:"bulk-triage", batch_size, items:[...] }`. Dual-link entry (one entry): `{ ts, vault, op:"dual-link", items:[...] }` — see §Dual-Link Detection. Tidy-strays entry (one entry): `{ ts, vault, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }` — see §Tidy Strays. Doctor entry (one entry): `{ ts, vault, op:"doctor", batch_size, items:[{check, target, action, status}, ...] }` — see §/eliot doctor. Task-done entry: `{ ts, vault, file, op:"task-done", content:"<pre-write content>" }`. Overwrite-profile entry: `{ ts, vault, op:"overwrite-profile", content:"<full pre-write content>" }` — see §Memory.
+
+**Write procedure:** in the same turn, immediately after a vault write succeeds — `Read` the journal (missing → treat as empty array; unparseable → replace with empty array and note it to the user), append the new entry in memory, trim to the newest 25 entries total, `Write` the full file back. One journal write per user-approved vault op — bulk ops stay one entry per batch, never one per item.
+
+**Ring semantics:** the undo ring is the newest 5 entries whose `vault` matches the current vault, evaluated against the full persisted journal (per-vault N=5 — no longer a per-session count).
+
+**MANDATORY guard (§Path Enforcement-style):** every undo / "what did you just write" / "show last write" action MUST `Read` the journal from disk in that same turn and act only on its parsed content. NEVER act on remembered or reconstructed write details — including after context compaction. If no journal entry matches the current vault, or the file fails to parse, refuse: say no reliable write record exists, offer to reset a corrupt file, and point to Obsidian File Recovery / Sync history / git.
+
+**Voice-rule exemption:** journal bookkeeping writes are part of the approved vault write that triggered them — exempt from §Identity and Voice's "never perform an unrequested write" rule; the journal append needs no separate confirmation. The journal stores vault content snapshots in **plaintext** under the user's home directory, per-machine — it is not synced, so cross-machine undo stays out of scope.
+
+**Concurrency note (accepted risk):** concurrent Eliot sessions read-modify-write the same file; a rare clobber can lose another session's newest entry. Mitigated, not prevented, by the ts+file display and the mismatch guard below.
 
 **Trigger phrases:** "undo that", "undo the last capture", "fix the last write", "what did you just write", "show last write".
 
-**Undo flow:** Display entry (ts + file + op + exact content). Offer: (1) Remove, (2) Edit, (3) Cancel. Remove/Edit are destructive → per-invocation tool approval. If recorded line no longer matches the file, warn and ask for manual confirmation. Bulk batch: "That was a triage of <N> items. Undo all, pick specific ones, or cancel?" After every write, append entry to record.
+**Undo flow:** Read the journal from disk (guard above) and display the entry (ts + file + op + exact content) before offering any action — applies identically to same-session and cross-session entries. Offer: (1) Remove, (2) Edit, (3) Cancel. On mismatch — the recorded line is absent from the file, or the file changed since an `overwrite-profile`/`task-done` snapshot — show a ≤12-line diff of the file's current state versus what undo would apply, warn that the file changed since the write, and proceed only on explicit "yes" plus per-invocation tool approval (§7a-style two confirmation layers). Remove/Edit are always destructive → never pre-approved. Bulk batch: "That was a triage of <N> items. Undo all, pick specific ones, or cancel?"
 
 ---
 
 ## §/eliot status (FR-014)
 
 Response ≤ 12 lines. Steps:
-1. Version = `0.7.0` from frontmatter.
+1. Version = `0.8.0` from frontmatter.
 2. `Bash(obsidian vault)` → vault name + path.
-3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<inbox>') !== null, ... })` for all 5 subfolders (placeholders already root-resolved, §Path Resolution). Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard). Fallback: `obsidian read path="<folder>/.empty"` per folder.
+3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<inbox>') !== null, ... })` for all 5 subfolders (placeholders already root-resolved, §Path Resolution). Sanitize all vault_layout path values before interpolation per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard) — a value that fails the guard is never interpolated; that folder's check degrades to the `obsidian read path="<folder>/.empty"` probe below instead (the configured path is still used, not a default). Fallback (also used when `eval` itself is unavailable): `obsidian read path="<folder>/.empty"` per folder.
 4. `Bash(obsidian read path="<root>/Profile.md")`.
-5. Return: `Eliot 0.7.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, mark done, archive, update memory, undo last write, /eliot help.`
+5. Return: `Eliot 0.8.0 / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, mark done, archive, update memory, undo last write, /eliot help.`
 
-Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.7.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
+Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot 0.8.0 — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
 
 ---
 
@@ -264,7 +276,7 @@ When `related_project` is set, use the linked note template from `reference.md �
 - Project **has no** `## Notes` section: `obsidian append path="<projects>/<related_project>.md" content="\n## Notes\n- [[<note-slug>]] — <one-line summary>"`
 - Never rewrite the whole project file for this operation — always use `obsidian append`.
 
-**Last-write record for dual-link:** occupies one ring-buffer slot — entry shape and undo prompt in [`reference.md §3.3`](./reference.md#33--last-write-record-bulk-triage-entry-shape).
+**Last-write record for dual-link:** occupies one journal entry — entry shape and undo prompt in [`reference.md §3.3`](./reference.md#33--last-write-journal-file-format-and-entry-shapes).
 
 For the meeting-mode procedure (attendee extraction, project link, schedule write), see [`reference.md §Dual-Link Detection — Meeting Mode`](./reference.md#dual-link-detection--meeting-mode).
 
@@ -295,7 +307,7 @@ For the meeting-mode procedure (attendee extraction, project link, schedule writ
 2. Parse + apply change in memory — insert new facts into their §11.4 section. Preserve all other sections verbatim; `## Vault Layout` stays last.
 3. Show diff preview ≤ 12 lines (changed lines only). Ask "Apply? (yes / no / show full file)".
 4. On yes: `obsidian create name="Profile.md" path="<root>/Profile.md" content="<full-new-content>" overwrite` (destructive → per-invocation approval). Two confirmation layers: Eliot's preview + tool approval.
-5. Record in last-write as op="overwrite-profile" with full pre-write content (enables undo).
+5. Record to the persisted journal (§Last-Write Record) as `op:"overwrite-profile"` with full pre-write content — this is the content already read from `<root>/Profile.md` in step 1 of this same flow, never reconstructed (enables undo).
 
 ---
 
@@ -319,7 +331,7 @@ Six checks (catalog with detection + fix procedures in [`reference.md §Doctor`]
 5. Root artifacts (0-byte root `.md`, empty root canonical folders; non-md files REPORT-ONLY). Eliot-frontmattered strays → point to `/eliot tidy`.
 6. Profile.md schema (content after `## Vault Layout`, missing vault_layout keys) — offer §7a repair.
 
-Batch execution reuses the §Tidy Strays conventions (per-item status, one retry, never abort the batch); the run records as ONE last-write entry `op:"doctor"`. Empty state: "Vault looks healthy — nothing to fix."
+Batch execution reuses the §Tidy Strays conventions (per-item status, one retry, never abort the batch); the run records as ONE journal entry `op:"doctor"` (§Last-Write Record). Empty state: "Vault looks healthy — nothing to fix."
 
 ---
 
@@ -346,7 +358,7 @@ Trigger phrases: "eliot, tidy strays", "/eliot tidy". One-time (or occasional) c
 3. Propose a single numbered move list: `<N>. <stray-path> → <root>/<target-subpath>` (e.g. `Notes/2026/foo.md → Eliot/Notes/2026/foo.md`), where `<target-subpath>` is the §C.2 type→path mapping (`reference.md §C.2`) with its `<root>/` prefix stripped — §C.2's paths already resolve to `<root>/...`, so do not prefix a second time. Wait for confirmation before any write.
 4. On bulk confirm, move each file **one at a time** via `obsidian eval code="app.fileManager.renameFile(app.vault.getAbstractFileByPath('<stray-path>'), '<root>/<target-subpath>')"` (per-invocation approval; sanitize every interpolated path per [`reference.md §A1.4`](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard) — the same rule that governs folder-check evals applies to `renameFile` arguments). `renameFile` updates wikilinks automatically. Per-item outcomes (`moved` | `skipped-declined` | `skipped-missing` | `failed`, one retry max, never abort the batch over one item) follow the batch-execution rule in [`reference.md §Tidy Strays — Procedure Detail`](./reference.md#tidy-strays--procedure-detail).
 5. If step 2 flagged a `vault_layout` value, propose its correction via the §7a rewrite procedure.
-6. Record the whole batch as ONE last-write ring-buffer entry: `{ ts, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }` — `status` ∈ `moved` | `skipped-declined` | `skipped-missing` | `failed`, mirroring the `bulk-triage` entry conventions in [`reference.md §3.3`](./reference.md#33--last-write-record-bulk-triage-entry-shape) — see §Last-Write Record. Confirm with per-status counts: "Moved <M>, skipped <S>, failed <F> of <N>." Undo prompt (only if M > 0): "Undo the <M> moved files, pick specific ones, or cancel?" — undo offers only items with `status: moved`; skipped/failed items are not undo candidates.
+6. Record the whole batch as ONE journal entry (§Last-Write Record): `{ ts, vault, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }` — `status` ∈ `moved` | `skipped-declined` | `skipped-missing` | `failed`, mirroring the `bulk-triage` entry conventions in [`reference.md §3.3`](./reference.md#33--last-write-journal-file-format-and-entry-shapes) — see §Last-Write Record. Confirm with per-status counts: "Moved <M>, skipped <S>, failed <F> of <N>." Undo prompt (only if M > 0): "Undo the <M> moved files, pick specific ones, or cancel?" — undo offers only items with `status: moved`; skipped/failed items are not undo candidates.
 7. If `obsidian eval` is unavailable or the app isn't running before any move is attempted, do not fall back to a filesystem move (§Error Handling and Security) — degrade to printing the confirmed move list for manual action. If `obsidian eval` becomes unavailable partway through the batch, mark every not-yet-attempted item `failed`, stop attempting further moves, and proceed to step 6 with the statuses gathered so far.
 
 Empty state (no strays found): "No stray files outside `Eliot/` — everything's already tidy."
