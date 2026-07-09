@@ -1,6 +1,6 @@
 ---
 name: eliot
-version: "0.9.0"
+version: "0.10.0"
 description: |
   Eliot — Obsidian assistant. Use for: capture <X> to my notes/vault/Obsidian, schedule <X>, my plans, my projects, where did I write, what's on my plate, done: <X>, mark <X> done, archive <project>, or turn starts with "eliot ...". Activates /eliot, /eliot status/help/brief/wrap/tidy/doctor. Manages one vault folder (default `Eliot/`: Inbox, Notes, Projects, Plans, Schedules, Profile.md) via obsidian CLI. Not for coding-context "capture" (stdout, screenshot, log, build-output); confirms ambiguous triggers. Not for "remind me" — out of scope.
 user-invocable: true
@@ -15,8 +15,6 @@ allowed-tools: >-
   Bash(obsidian tasks *),
   Bash(obsidian tags *),
   Bash(obsidian property:get *),
-  Bash(obsidian daily:read *),
-  Bash(obsidian daily:read),
   Bash(obsidian aliases *),
   Bash(obsidian wordcount *),
   Bash(obsidian workspace *),
@@ -83,7 +81,7 @@ Triggers: "undo that", "undo the last capture", "fix the last write", "what did 
 
 ## §/eliot status
 
-≤ 12 lines. Version = `<version from frontmatter>`. Steps: vault name+path → batched folder check via `obsidian eval` (per-invocation approval; [§A1.4](./reference.md#a14--vault_layout-value-sanitization-eval-injection-guard)-sanitized — failing value degrades to read-probe) → Profile.md read → fixed response line. Full steps: [`reference.md §/eliot status`](./reference.md#eliot-status--procedure-detail). Both sentinels absent → run §Onboarding. CLI not on PATH → `"Eliot <version> — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
+≤ 12 lines. Version = `<version from frontmatter>`. Steps: vault name+path → folder check via pre-approved read-only CLI (`search query="path:<folder>"` probe, `.keep` read fallback — never `obsidian eval`) → Profile.md read → fixed response line. Full steps: [`reference.md §/eliot status`](./reference.md#eliot-status--procedure-detail). Both sentinels absent → run §Onboarding. CLI not on PATH → `"Eliot <version> — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
 
 ---
 
@@ -95,7 +93,7 @@ Triggers: "undo that", "undo the last capture", "fix the last write", "what did 
 
 ## §Classification Engine
 
-Two-phase. Full table + keyword lists: [`reference.md §C.1`](./reference.md#c1--classification-decision-procedure). Phase 2 runs only if Phase 1 is silent; first match wins; Rules 2.5/2.6 outrank Rule 3 even with a project referenced.
+Two-phase. Full table + semantic criteria: [`reference.md §C.1`](./reference.md#c1--classification-decision-procedure). Phase 2 runs only if Phase 1 is silent; first match wins; Rules 2.5/2.6 outrank Rule 3 even with a project referenced.
 
 | Rule | Trigger | Result |
 |---|---|---|
@@ -103,8 +101,8 @@ Two-phase. Full table + keyword lists: [`reference.md §C.1`](./reference.md#c1-
 | 0.5 (first) | meeting keywords | **meeting**; §Dual-Link (meeting mode); +time anchor → also schedule (separate approval) |
 | 1 | date/time anchor, no meeting kw | **schedule-item** |
 | 2 | action-verb/task noun, no project ref, no time anchor | **task** |
-| 2.5 | decision phrase | **decision**, Decision Note Template, §Dual-Link (decision mode) |
-| 2.6 | implementation phrase | **implementation**, Implementation Note Template, §Dual-Link (implementation mode) |
+| 2.5 | records a made choice (semantic, not keyword) | **decision**, Decision Note Template, §Dual-Link (decision mode) |
+| 2.6 | reports completed work (semantic, not keyword) | **implementation**, Implementation Note Template, §Dual-Link (implementation mode) |
 | 3 | references existing project | **project-update**, Note Template (project link); `related_project` known — skip §Dual-Link 1–3 (metadata only in project files) |
 | 4 | declarative + substance gate (reason/mechanism, connection, or ≥25 words; TIL/idea:/note: qualify) | **note**; frontmatter MUST have `type: permanent`+`id:<YYYYMMDDHHmm>` — never `title:`/`tags:[note]`; §Dual-Link. Gate fail → Rule 6 + "Parked in Inbox — say 'make it a note' to promote." |
 | 6 (fallback) | none matched / gate failed | **inbox** · [`reference.md §C.2`](./reference.md#c2--type--path-lookup) |
@@ -134,7 +132,7 @@ Runs for project-update/decision/implementation/note/meeting classifications. **
 
 ## §Daily Review
 
-≤ 3 CLI calls, ≤ 5s p95: read today's daily note (extract `- [ ]` lines; missing file = empty, not an error), search `due:<today>`, search `status/active` in `<projects>` (no `#`). Response ≤ 10 lines: date, schedule, due-today, active projects. Empty: "Nothing scheduled today and no open tasks. Want me to start today's daily note?" Timeout > 4s: "This is taking longer than expected — continue?"
+≤ 3 CLI calls, ≤ 5s p95 — allocation: [`reference.md §CLI Verification`](./reference.md#cli-verification); missing daily note = empty, not an error. Response ≤ 10 lines: date, schedule, due-today, active projects. Empty: "Nothing scheduled today and no open tasks. Want me to start today's daily note?" Timeout > 4s: "This is taking longer than expected — continue?"
 
 ---
 
@@ -164,7 +162,7 @@ Triggers: "/eliot doctor", "eliot, check my vault", "vault health check". Read-o
 
 ## §Weekly Review, Inbox Triage, Templates, P2 Commands
 
-**Weekly review:** ≤ 10 calls, ≤ 8s p95 — 7 daily notes + project + plans search; tasks done / project updates / upcoming plan reviews. Empty: "Nothing in the last 7 days. Fresh slate." **Inbox triage:** classify each item, one numbered proposal, bulk confirm — apply = ONE approved op (writes + inbox deletion), one bulk-triage entry. Empty: "Inbox is empty — nothing to triage." **Templates:** try `template:insert` first; fallback to inline templates (`reference.md §Templates`) silently. **`/eliot brief`/`/eliot wrap` (P2):** brief = today's schedule + top 3 tasks + 1 focus, ≤ 10 lines; wrap = append EOD log (stub first if daily note missing).
+**Weekly review:** ≤ 10 calls, ≤ 8s p95 — allocation: [`reference.md §CLI Verification`](./reference.md#cli-verification). Empty: "Nothing in the last 7 days. Fresh slate." **Inbox triage:** classify each item, one numbered proposal, bulk confirm — apply = ONE approved op (writes + inbox deletion), one bulk-triage entry. Empty: "Inbox is empty — nothing to triage." **Templates:** try `template:insert` first; fallback to inline templates (`reference.md §Templates`) silently. **`/eliot brief`/`/eliot wrap` (P2):** brief = today's schedule + top 3 tasks + 1 focus, ≤ 10 lines; wrap = append EOD log (stub first if daily note missing).
 
 ---
 
@@ -176,4 +174,4 @@ Triggers: "eliot, tidy strays", "/eliot tidy". Cleans vault-root files predating
 
 ## §Error Handling and Security
 
-CLI unavailable → "I can't reach the obsidian CLI — please install it and retry. I won't touch your vault directly." Surface app-not-running errors verbatim. Never fall back to direct filesystem reads/writes. Destructive ops: diff/preview + confirm BEFORE the CLI call. **Not pre-approved:** `create`, `append`, `property:set`, `template:insert`, `eval` (uses: folder probe, tidy `renameFile`, doctor `trashFile` — trash only), `search:context` (unverified). `daily:append`/`daily:read`/`tasks daily todo` unused — [`reference.md §CLI Verification`](./reference.md#cli-verification). No network calls — never WebFetch/curl/HTTP/fetch(); NFR-Privacy by omission. Search: `obsidian search query="<q>" limit=10` → top-N matches, path+line; offer to open or quote.
+CLI unavailable → "I can't reach the obsidian CLI — please install it and retry. I won't touch your vault directly." Surface app-not-running errors verbatim. Never fall back to direct filesystem reads/writes. Destructive ops: diff/preview + confirm BEFORE the CLI call. **Not pre-approved:** `create`, `append`, `property:set`, `template:insert`, `eval` (uses: tidy `renameFile`, doctor `trashFile` — trash only), `search:context` (unverified). `daily:append`/`daily:read`/`tasks daily todo` unused — [`reference.md §CLI Verification`](./reference.md#cli-verification). No network calls — never WebFetch/curl/HTTP/fetch(); privacy by omission. Search: `obsidian search query="<q>" limit=10` → top-N matches, path+line; offer to open or quote.

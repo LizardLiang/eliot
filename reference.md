@@ -6,7 +6,7 @@ This file is loaded by `SKILL.md` on demand. It contains: verified obsidian CLI 
 
 ## §CLI Verification
 
-Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/obsidian-cli/SKILL.md` (2026-05-13). Re-verify before each release via Appendix B.3 script.
+Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/obsidian-cli/SKILL.md` (2026-05-13). Re-verify before each release against the obsidian-cli skill doc at the path above.
 
 | # | Subcommand | Status | Notes |
 |---|---|---|---|
@@ -20,7 +20,7 @@ Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/
 | 7 | `obsidian tasks todo [verbose] [format=json]` | VERIFIED | All open tasks across vault |
 | 8 | `obsidian property:get name="<n>" file="<p>"` | VERIFIED | Read a frontmatter property |
 | 9 | `obsidian daily:read` | VERIFIED | not used — follows plugin folder, may escape root. Replaced by `obsidian read path="<schedules_daily>/<date>.md"` |
-| 10 | `obsidian eval code="<js>"` | VERIFIED | Runs JS in Obsidian renderer context. NOT pre-approved — destructive potential. Requires per-invocation approval. Use only for: (a) folder existence probe, (b) §Tidy Strays file moves via `app.fileManager.renameFile`, (c) §Doctor fixes via `app.fileManager.trashFile` (move to Obsidian trash — never hard delete). Daily-notes plugin config is no longer queried (§A3). |
+| 10 | `obsidian eval code="<js>"` | VERIFIED | Runs JS in Obsidian renderer context. NOT pre-approved — destructive potential. Requires per-invocation approval. Use only for: (a) §Tidy Strays file moves via `app.fileManager.renameFile`, (b) §Doctor fixes via `app.fileManager.trashFile` (move to Obsidian trash — never hard delete). Never for read-only checks — status folder checks use `search`/`read` instead. Daily-notes plugin config is no longer queried (§A3). |
 | 11 | `obsidian create name="<n>" [path="<p>"] [content="<c>"] [silent] [overwrite]` | VERIFIED | Creates a note. `silent` = no auto-open. `overwrite` = replace existing. NOT pre-approved. |
 | 12 | `obsidian append file="<n>" content="<c>"` or `path="<p>"` | VERIFIED | Appends text to existing file. NOT pre-approved. |
 | 13 | `obsidian daily:append content="<c>"` | VERIFIED | not used — follows plugin folder, may escape root. Replaced by `obsidian append path="<schedules_daily>/<date>.md"` |
@@ -51,11 +51,11 @@ Verified against `~/.claude/plugins/cache/obsidian-skills/obsidian/1.0.1/skills/
 Response length cap (≤ 12 lines) lives in `SKILL.md §/eliot status`. Steps:
 1. Version = `<version from frontmatter>`.
 2. `Bash(obsidian vault)` → vault name + path.
-3. Batched folder check via `obsidian eval` (requires per-invocation approval — eval can mutate vault state): `JSON.stringify({ inbox: app.vault.getAbstractFileByPath('<inbox>') !== null, ... })` for all 5 subfolders (placeholders already root-resolved, `SKILL.md §Path Resolution`). Sanitize all vault_layout path values before interpolation per [§A1.4](#a14--vault_layout-value-sanitization-eval-injection-guard) — a value that fails the guard is never interpolated; that folder's check degrades to the `obsidian read path="<folder>/.empty"` probe below instead (the configured path is still used, not a default). Fallback (also used when `eval` itself is unavailable): `obsidian read path="<folder>/.empty"` per folder.
+3. Folder check via pre-approved read-only CLI — never `obsidian eval` (status is read-only; eval needs per-invocation approval and can mutate vault state). Per folder, all 5 subfolders (placeholders already root-resolved, `SKILL.md §Path Resolution`): `obsidian search query="path:<folder>" limit=1 format=json` — ≥ 1 result = present. 0 results → probe `obsidian read path="<folder>/.keep"` — readable = present (folder exists, no indexed notes). Both empty → report absent (accepted limit: an empty folder without `.keep` reads as absent; folders are created lazily with content). No [§A1.4](#a14--vault_layout-value-sanitization-eval-injection-guard) sanitization applies — nothing is interpolated into an eval string; configured paths pass to `search`/`read` arguments as-is.
 4. `Bash(obsidian read path="<root>/Profile.md")`.
 5. Return: `Eliot <version> / Vault: <name> (<path>) / Folders: ... / Profile.md: present|absent / You can ask me to: capture, daily review, search, project status, schedule, mark done, archive, update memory, undo last write, /eliot help.`
 
-Both sentinels absent at status → run §Onboarding. CLI not on PATH → `"Eliot <version> — couldn't reach the obsidian CLI. Install it (https://help.obsidian.md/cli) and retry. I won't touch your vault directly."` App not running → surface CLI error verbatim.
+Onboarding fallback and the exact CLI-unavailable / app-not-running strings live in SKILL.md §/eliot status.
 
 ---
 
@@ -130,9 +130,8 @@ vault_layout:
 Before interpolating any `vault_layout` value (including `root`) into an `obsidian eval code=` string:
 1. Denylist check: reject the value iff it contains any of `'`, `"`, `\`, `` ` ``, `$`, `;`, or any control character (U+0000–U+001F, U+007F). All other characters — including CJK and any other Unicode script — pass; this guard does not restrict folder names to ASCII, and non-ASCII `vault_layout` values (e.g. `root: "筆記"`) are fully supported.
 2. On rejection, **do not interpolate** that value into any eval string. The configured path itself remains authoritative for every non-eval CLI operation (`create`, `append`, `read`, `search path=`, `property:set`, `template:insert`) — never redirect a read or write to a default folder. Only the eval-based operation degrades:
-   - Folder-existence checks fall back to the non-eval `obsidian read` probe for that folder (the same fallback already named in `SKILL.md §/eliot status` step 3).
    - Per-item eval operations (`renameFile`, `trashFile`) mark that item's status `failed` and continue the rest of the batch — the standard `SKILL.md §Tidy Strays` batch-execution rule.
-   - Warn once per session: "Your vault path for `<key>` contains a character (`<char>`) that can't be used in an eval-based check or move. The path itself is still used for reads and writes — only that check/move is skipped. Correct it in Profile.md?" (offers the [§7a](#7a--profilemd-vault_layout-rewrite-procedure) correction flow).
+   - Warn once per session: "Your vault path for `<key>` contains a character (`<char>`) that can't be used in an eval-based move or fix. The path itself is still used for reads and writes — only that move/fix is skipped. Correct it in Profile.md?" (offers the [§7a](#7a--profilemd-vault_layout-rewrite-procedure) correction flow).
 3. Single-quote convention: every eval call site MUST wrap an interpolated path as a single-quoted JS string literal (e.g. `'<path>'`) — never double-quoted or unquoted. The denylist in rule 1 prevents injection only under this convention.
 4. This rule applies to every path value interpolated into `obsidian eval code=` strings anywhere in Eliot's instructions.
 
@@ -157,13 +156,13 @@ Trigger phrases and the "never fall back to filesystem move" invariant live in `
 1. **Scan for strays.** A file directly under the vault root inside `Inbox`/`Inbox.md`, `Notes/`, `Projects/`, `Plans/`, or `Schedules/` (i.e. NOT already under `<root>/`) counts as an Eliot stray when its frontmatter has: `type` equal to one of `permanent`, `decision`, `implementation`, `meeting`, `project`, `plan`, `daily`, AND an Eliot-authored `id` (`<YYYYMMDDHHmm>`, 12 digits), `created` (`<YYYY-MM-DD>`), or `date` (`<YYYY-MM-DD>`) key — the Meeting Note Template and Daily Note Stub Template use `date` instead of `id`/`created`, so this key must also be accepted or `meeting`/`daily` strays can never be detected. Files without this frontmatter shape are left alone — they may be hand-authored and outside Eliot's remit. The user confirms the final move list regardless.
 2. **Check vault_layout too.** Read `<root>/Profile.md` `vault_layout` and check whether any folder value resolves outside `<root>/` (e.g. a pre-0.6.0 plugin-adopted `schedules_daily`, per §A3). Flag it for correction alongside the stray files.
 3. **Propose the move list.** A single numbered list: `<N>. <stray-path> → <root>/<target-subpath>` (e.g. `Notes/2026/foo.md → Eliot/Notes/2026/foo.md`), where `<target-subpath>` is the [§C.2](#c2--type--path-lookup) type→path mapping with its `<root>/` prefix stripped — §C.2's paths already resolve to `<root>/...`, so do not prefix a second time. Wait for confirmation before any write.
-4. **Move mechanism.** On bulk confirm, move each file **one at a time** — the verified CLI has no dedicated move/rename subcommand (§CLI Verification). Use `obsidian eval code="app.fileManager.renameFile(<TFile>, '<new-path>')"` (per-invocation approval) — this Obsidian API updates all wikilinks pointing to the moved file automatically. Resolve the `<TFile>` argument via `app.vault.getAbstractFileByPath('<stray-path>')` inside the same eval call. Sanitize every interpolated path (`<stray-path>` and `<new-path>`) per [§A1.4](#a14--vault_layout-value-sanitization-eval-injection-guard) before building the eval string — the same injection rule that governs folder-check evals applies here, including the single-quote convention. If a path fails the §A1.4 denylist check, record that item's status as `failed`, skip it, and continue with the rest of the batch.
+4. **Move mechanism.** On bulk confirm, move each file **one at a time** — the verified CLI has no dedicated move/rename subcommand (§CLI Verification). Use `obsidian eval code="app.fileManager.renameFile(<TFile>, '<new-path>')"` (per-invocation approval) — this Obsidian API updates all wikilinks pointing to the moved file automatically. Resolve the `<TFile>` argument via `app.vault.getAbstractFileByPath('<stray-path>')` inside the same eval call. Sanitize every interpolated path (`<stray-path>` and `<new-path>`) per [§A1.4](#a14--vault_layout-value-sanitization-eval-injection-guard) before building the eval string — the standard eval injection rule, including the single-quote convention. If a path fails the §A1.4 denylist check, record that item's status as `failed`, skip it, and continue with the rest of the batch.
    **Batch-execution rule (per-item status):** moves happen one item at a time; the batch never aborts because one item can't be moved. Each item ends in exactly one status — `moved`, `skipped-declined` (per-invocation approval for that item's `obsidian eval` was declined), `skipped-missing` (`app.vault.getAbstractFileByPath('<stray-path>')` returns null when the move is attempted — the file vanished between proposal and execution), or `failed` (the eval call errored after one retry, or the path failed the §A1.4 sanitization check). An item is retried at most once on error before being marked `failed`.
 5. **Vault_layout correction.** If step 2 flagged a `vault_layout` value, propose its correction via the §7a rewrite procedure — never silently rewrite Profile.md.
 6. **Record and confirm.** Record the whole batch as ONE journal entry (`{ ts, vault, op:"tidy-strays", batch_size, items:[{from, to, status}, ...] }`, mirroring the `bulk-triage` entry shape in [§3.3](#33--last-write-journal-file-format-and-entry-shapes)). Confirm with per-status counts: "Moved <M>, skipped <S>, failed <F> of <N>." Undo prompt (only if M > 0): "Undo the <M> moved files, pick specific ones, or cancel?" — undo offers only items with `status: moved`; skipped/failed items are not undo candidates.
 7. **Degraded mode.** If `obsidian eval` is unavailable or the app isn't running before any move is attempted, do not fall back to a filesystem move (§Error Handling and Security) — degrade to printing the confirmed move list for manual action. If `obsidian eval` becomes unavailable partway through the batch, mark every not-yet-attempted item `failed`, stop attempting further moves, and proceed to step 6 with the statuses gathered so far.
 
-Empty state (no strays found): "No stray files outside `Eliot/` — everything's already tidy."
+Empty-state string lives in SKILL.md §Tidy Strays.
 
 ---
 
@@ -184,8 +183,8 @@ Two-phase evaluation. Inbox is always-available fallback.
 | 0.5 (check FIRST) | Content starts with or contains "meeting with", "call with", "sync with", "standup", "1:1", "catch-up with", "interview with" | **meeting** → create meeting note; run §Dual-Link Detection (meeting mode). If time anchor also present, additionally append `- [ ] HH:MM [[<meeting-slug>]]` to daily schedule |
 | 1 | Content contains explicit date/time anchor (no meeting keywords) | **schedule-item** |
 | 2 | Content begins with an action verb OR concrete noun implying a task — AND has no project reference AND no time anchor | **task** |
-| 2.5 | Content contains "decided to", "decision:", "we chose", "went with", "implementation decision", "architecture decision", "note the decision", "record this decision", "chose to", "we're going with" — fires even when a project is also referenced | **decision** → create with Decision Note Template (frontmatter MUST have `type: decision` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (decision mode) |
-| 2.6 | Content contains "add what we built", "add what we've built", "add what we've done", "add what we did", "note our implementation", "what we implemented", "document what we built", "add to notes under", "capture our progress", "log our work" — fires even when a project is also referenced | **implementation** → create with Implementation Note Template (frontmatter MUST have `type: implementation` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (implementation mode) |
+| 2.5 | Content **records a choice that was made** — the utterance's point is committing to an option (possibly among alternatives), stated as already decided. Judge by meaning, not keyword match; e.g. "decided to…", "decision: going with X over Y", "we chose…" are illustrative, and paraphrases or other languages carrying the same meaning fire too — fires even when a project is also referenced | **decision** → create with Decision Note Template (frontmatter MUST have `type: decision` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (decision mode) |
+| 2.6 | Content **reports completed work** — the point is documenting what was built/implemented/changed, after the fact. Judge by meaning, not keyword match; e.g. "add what we built…", "log our work", "we implemented X" are illustrative, paraphrases and other languages fire too. Distinguish from Rule 2 (task = work still to do) and Rule 2.5 (choice made vs work done) — fires even when a project is also referenced | **implementation** → create with Implementation Note Template (frontmatter MUST have `type: implementation` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (implementation mode) |
 | 3 | Content explicitly references an existing project (matches file in Projects/ by name or [[wikilink]]) | **project-update** → create note in `<notes>/<YYYY>/<slug>.md` with Note Template (with project link); append link to project's `## Notes`. Project files hold only metadata |
 | 4 | Content is declarative/descriptive AND passes the **substance gate** below | **note** → create with Note Template (frontmatter MUST have `type: permanent` + `id: <YYYYMMDDHHmm>`); run §Dual-Link Detection (note mode) |
 | 6 (fallback) | None of Rules 0.5–4 match, or Rule 4 fired but the substance gate failed | **inbox** |
@@ -233,10 +232,10 @@ For each candidate token: `Bash(obsidian search query="<token>" path="<projects>
 - **Exactly one match** → set `related_project = <matched-slug>`; continue silently.
 - **Multiple matches** → ask once: "I found `<a>`, `<b>` — link this note to which project?" Wait for answer before writing.
 - **No match, project NOT explicitly named** → `related_project` unset; use standard note template; skip steps 4–5.
-- **No match, but the user explicitly named a project** (prefix `<name>:`, "the <X> project", explicit `[[wikilink]]`) → ask once: "No project `<slug>` yet — create `Eliot/Projects/<slug>.md` and link, or capture without a link?" Create → Project Template (+ §Create Guard), then proceed as project-update. Decline → plain-text mention, `up: []`. **Invariant: an unverified project reference NEVER becomes a wikilink.**
+- **No match, but the user explicitly named a project** (prefix `<name>:`, "the <X> project", explicit `[[wikilink]]`) → ask once: "No project `<slug>` yet — create `Eliot/Projects/<slug>.md` and link, or capture without a link?" Create → Project Template (+ §Create Guard), then proceed as project-update. Decline → plain-text mention, `up: []`.
 
 **Step 3.5 — Fill `says` and `up` before writing:**
-- `says`: derive from the first sentence of the note content, truncated to ~120 chars. This populates Dataview tables automatically — don't leave it blank.
+- `says`: derive from the first sentence of the note content, truncated to ~120 chars. If no meaningful first sentence exists, leave it empty — never invent content.
 - `up`: if `related_project` is set, populate `up: ["[[<project-slug>]]"]`. If not, ask once: "Which topic area does this note belong to? (e.g. `[[Machine Learning MOC]]`, or press Enter to leave blank)". One question, optional — never block the write waiting for it. If the answer names a target that doesn't resolve (`obsidian read` fails), confirm before writing it dangling: "`[[<target>]]` doesn't exist yet — link anyway, or leave blank?"
 
 **Step 4 — Note side:**
@@ -303,7 +302,7 @@ Full flow in `SKILL.md §/eliot doctor`. Scan is read-only; every fix requires p
 
 | # | Check | Detection | Fix (on user pick) |
 |---|---|---|---|
-| 1 | Broken wikilinks | In Eliot-authored files (`up:`/`related:` frontmatter, schedule lines, project `## Notes`/`## Decisions` entries): extract `[[target]]`, probe `obsidian read path=`/`file=` for each unique target | Per missing-project policy (SKILL.md §Dual-Link step 3): create the target project (Project Template + §Create Guard) / convert link to plain text / leave as-is |
+| 1 | Broken wikilinks | In Eliot-authored files (`up:` frontmatter — plus `related:` in pre-0.10 notes —, schedule lines, project `## Notes`/`## Decisions` entries): extract `[[target]]`, probe `obsidian read path=`/`file=` for each unique target | Per missing-project policy (SKILL.md §Dual-Link step 3): create the target project (Project Template + §Create Guard) / convert link to plain text / leave as-is |
 | 2 | Duplicate files | Sibling `<name> 1.md` beside `<name>.md` (create auto-suffix pattern) in `<projects>`, `<plans>`, `<notes>` | Show both; user picks canonical; append the other's non-empty body under `## Merged from <dupe>` in the canonical file; trash dupe via `obsidian eval code="app.fileManager.trashFile(app.vault.getAbstractFileByPath('<path>'))"` (Obsidian trash — recoverable, never hard delete; §A1.4 sanitization applies) |
 | 3 | Placeholder residue | Literal `[What does done look like?]`, `area: "[[]]"`, empty REQUIRED sections (`## Goal` with no body), bare `- [ ] ` / `- ` stubs | Fill now (ask one question) or strip the placeholder/stub (file rewrite via `create ... overwrite`, diff preview first) |
 | 4 | Stale-active projects | `status/active` projects unmodified > 30 days (`obsidian search query="path:<projects> modified:30d"` inverted, or read `created`/mtime) | Offer the §Lifecycle project-archive flow per project |
@@ -400,7 +399,7 @@ vault_layout:
 
 ## §7a — Profile.md vault_layout Rewrite Procedure
 
-Used for any FR-007 update or remove operation on Profile.md sections. Same procedure applies to Working Hours, Routines, People, Preferences, and Recurring Projects when updating/removing (not appending).
+Used for any update or remove operation on Profile.md sections. Same procedure applies to Working Hours, Routines, People, Preferences, and Recurring Projects when updating/removing (not appending).
 
 1. `Bash(obsidian read path="<root>/Profile.md")` — read full current content.
 2. Parse in memory (model is the YAML parser). Locate the target section/key.
@@ -431,9 +430,9 @@ Trigger ("both sentinels absent") and the "MUST complete all steps before the ta
 
 **Step 3 — Create Profile.md via obsidian CLI (REQUIRED):** Profile.md is a vault file — it MUST be created via `obsidian create` so Obsidian indexes it. Do NOT use the `Write` tool for vault files. Content = the canonical [§11.4](#114--profilemd-section-schema-locked) schema with all sections empty, `default_capture_time: unset` under `## Preferences`, and the full default `vault_layout` block (every key from [§A1.3](#a13--vault_layout-schema), including `inbox`, `inbox_file`, `plans`) as the final section:
 ```
-obsidian create name="Profile.md" path="Eliot" content="<§11.4 canonical content>"
+obsidian create name="Profile.md" path="<root>" content="<§11.4 canonical content>"
 ```
-Do NOT use the `silent` flag here — if the create fails (e.g. Eliot folder doesn't exist), the error must surface so you can handle it. If it fails, retry with an explicit folder creation step first: `obsidian create name=".keep" path="Eliot" content=""` then retry Profile.md creation. After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1)` (macOS/Linux) or `Bash(Start-Sleep -Seconds 1)` (Windows). Then verify with `obsidian read path="<root>/Profile.md"` before proceeding.
+Do NOT use the `silent` flag here — if the create fails (e.g. Eliot folder doesn't exist), the error must surface so you can handle it. If it fails, retry with an explicit folder creation step first: `obsidian create name=".keep" path="<root>" content=""` then retry Profile.md creation. After creating Profile.md, wait 1 second for Obsidian to index it: `Bash(sleep 1)` (all platforms — the Bash tool is POSIX even on Windows). Then verify with `obsidian read path="<root>/Profile.md"` before proceeding.
 
 **Step 4 — Write sentinel (REQUIRED):** Use Claude Code `Write` tool (NOT shell redirection). Detect home: Windows = `$env:USERPROFILE`, macOS/Linux = `$HOME`. Write to `<home>/.eliot/onboarded`:
 ```
@@ -443,7 +442,7 @@ skill_version: <version from frontmatter>
 
 **Step 5 — Execute the user's task:** Now run the task exactly as if both sentinels were present (§Session Open → task flow). Begin the response with: `Hi — I'm Eliot, your Obsidian assistant.`
 
-**Step 6 — Append first-run note (after task output):** End the response with: `_(First run — set up with defaults. \`/eliot status\` to review, or tell me your name, working hours, or routines anytime.)_`
+**Step 6 — Append first-run note (after task output):** exact string lives in `SKILL.md §Silent Setup`.
 
 ---
 
@@ -603,7 +602,6 @@ type: meeting
 attendees: []
 projects: []
 summary: ""
-up: []
 tags: [meeting]
 ---
 
@@ -629,17 +627,14 @@ tags: [meeting]
 
 Used when §Dual-Link Detection finds no matching project.
 
-Section policy: `## The Idea` is **REQUIRED** (always emitted, holds the user's content verbatim). `## Why It Matters` and `## Connections` are **OPTIONAL** — emit them only when the user gave reasons or connections; never emit an empty heading or the bare `- Supports: / - Challenges:` skeleton. Frontmatter keys are schema — always present (`says` mandatory-filled per §Dual-Link step 3.5).
+Section policy: `## The Idea` is **REQUIRED** (always emitted, holds the user's content verbatim). `## Why It Matters` and `## Connections` are **OPTIONAL** — emit them only when the user gave reasons or connections; never emit an empty heading or the bare `- Supports: / - Challenges:` skeleton. Frontmatter: `id`, `created`, `type` always; `up` and `says` filled per §Dual-Link step 3.5. Omit valueless keys — never emit empty `tags`/`aliases`/`related` placeholders.
 
 ```markdown
 ---
 id: <YYYYMMDDHHmm>
 created: <YYYY-MM-DD>
 type: permanent
-tags: []
-aliases: []
 up: []
-related: []
 says: ""
 ---
 
@@ -665,11 +660,8 @@ Used when §Dual-Link Detection sets `related_project`. Includes `up` pointing t
 id: <YYYYMMDDHHmm>
 created: <YYYY-MM-DD>
 type: permanent
-tags: []
-aliases: []
 up:
   - "[[<project-slug>]]"
-related: []
 says: ""
 ---
 
@@ -697,7 +689,6 @@ type: decision
 status: accepted
 tags: [decision]
 up: []
-related: []
 says: ""
 ---
 
@@ -735,7 +726,6 @@ status: accepted
 tags: [decision]
 up:
   - "[[<project-slug>]]"
-related: []
 says: ""
 ---
 
@@ -776,7 +766,6 @@ created: <YYYY-MM-DD>
 type: implementation
 tags: [implementation]
 up: []
-related: []
 says: ""
 ---
 
@@ -813,7 +802,6 @@ type: implementation
 tags: [implementation]
 up:
   - "[[<project-slug>]]"
-related: []
 says: ""
 ---
 
@@ -895,7 +883,9 @@ Project **has no** `## Notes` section:
 - [[<meeting-slug>]] — meeting <YYYY-MM-DD>: <one-line summary>
 ```
 
-### Eliot/README Template (written during onboarding)
+### Eliot/README Template (created on request)
+
+Used when the user asks for a README/conventions file in the Eliot folder (e.g. "add a readme to your folder"). Normal write rules apply — confirm before creating; never written during onboarding.
 
 ```markdown
 # Eliot — Vault Conventions
@@ -948,9 +938,9 @@ The path is computed at runtime from environment variables. It is never hard-cod
 ## §Known Limits
 
 - Last-write record persists across sessions in `<home>/.eliot/last-writes.json` (25-entry cap, per-vault N=5 undo ring). `/eliot doctor` journal-health checks and `/eliot status` journal reporting are not yet implemented — future enhancements.
-- Multi-vault support (FR-030) is P2. v1 always uses the active vault.
+- Multi-vault support is P2. v1 always uses the active vault.
 - `obsidian search:context` is not in the verified CLI surface and is not pre-approved.
 - `/eliot brief` and `/eliot wrap` are P2 features.
 - §Doctor never auto-merges duplicate content beyond the `## Merged from <dupe>` append; deeper merges are the user's call.
 - Non-md artifacts inside Eliot folders (scripts, images misfiled by other tools) are report-only — Eliot never moves non-vault files.
-- `vault_layout` values may use any Unicode script (CJK included) — the §A1.4 guard is a denylist, not an ASCII allowlist. The residual limit: a value containing a denylisted character (`'` `"` `\` `` ` `` `$` `;`, or a control character) cannot be used in eval-based operations — folder-existence checks degrade to the read-probe fallback and per-item moves/fixes mark that item `failed` — until corrected via [§7a](#7a--profilemd-vault_layout-rewrite-procedure). Reads and writes to the configured path are unaffected.
+- `vault_layout` values may use any Unicode script (CJK included) — the §A1.4 guard is a denylist, not an ASCII allowlist. The residual limit: a value containing a denylisted character (`'` `"` `\` `` ` `` `$` `;`, or a control character) cannot be used in eval-based operations (tidy moves, doctor fixes) — the affected item is marked `failed` — until corrected via [§7a](#7a--profilemd-vault_layout-rewrite-procedure). Reads and writes to the configured path are unaffected.
